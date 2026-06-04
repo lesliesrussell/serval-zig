@@ -1,0 +1,27 @@
+// serval-15q
+//! Serval — serialization + validation for Zig.
+//!
+//! Umbrella module: most users `@import("serval")` and reach everything via
+//! `serval.core`, `serval.validate`, `serval.json`. Advanced users can wire
+//! the underlying modules (serval-core, serval-validate, serval-codec,
+//! serval-json) directly in their build.zig.
+
+pub const core = @import("serval-core");
+pub const validate = @import("serval-validate");
+pub const codec = @import("serval-codec");
+pub const json = @import("serval-json");
+
+pub const derive = @import("derive/derive.zig");
+
+pub const testing = struct {
+    pub const fixtures = @import("testing/fixtures.zig");
+    pub const roundtrip = @import("testing/roundtrip.zig");
+    pub const fuzz = @import("testing/fuzz.zig");
+};
+
+// Convenience re-exports for the common path.
+pub const schemaOf = core.schemaOf;
+pub const Schema = core.Schema;
+pub const Value = core.Value;
+pub const ValidationReport = core.ValidationReport;
+pub const DecodeResult = core.DecodeResult;
