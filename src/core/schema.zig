@@ -1,14 +1,22 @@
 // serval-15q
 //! Comptime-generated structural metadata for Zig types.
+//! Customization comes from an explicit `pub const serval = .{ ... }`
+//! declaration adjacent to the type (Zig has no attributes).
 
 const std = @import("std");
 const attributes = @import("attributes.zig");
+const field_meta = @import("field_meta.zig");
+const naming = @import("naming.zig");
 
+// serval-4am
 pub const Field = struct {
     name: []const u8,
-    wire_name: ?[]const u8 = null,
+    /// Resolved wire name: explicit `.rename` if given, else the
+    /// rename_all policy applied to the Zig field name.
+    wire_name: []const u8,
     is_optional: bool = false,
     has_default: bool = false,
+    meta: field_meta.FieldMeta = .{},
 };
 
 pub const TypeOptions = struct {
@@ -31,17 +39,23 @@ pub fn schemaOf(comptime T: type) type {
     return Schema(T);
 }
 
+// serval-4am
 fn collectFields(comptime T: type) []const Field {
     comptime {
         const info = @typeInfo(T);
         if (info != .@"struct") return &.{};
+        verifyMetadataFieldKeys(T);
+        const opts = collectOptions(T);
         const struct_fields = info.@"struct".fields;
         var out: [struct_fields.len]Field = undefined;
         for (struct_fields, 0..) |f, i| {
+            const meta = fieldMetaFor(T, f.name);
             out[i] = .{
                 .name = f.name,
+                .wire_name = meta.rename orelse naming.convert(opts.rename_all, f.name),
                 .is_optional = @typeInfo(f.type) == .optional,
                 .has_default = f.default_value_ptr != null,
+                .meta = meta,
             };
         }
         const final = out;
@@ -49,9 +63,59 @@ fn collectFields(comptime T: type) []const Field {
     }
 }
 
+// serval-4am
 fn collectOptions(comptime T: type) TypeOptions {
-    // Reserved: parse the `pub const serval = .{ ... }` metadata declaration
-    // (rename_all, per-field constraints) — see docs/architecture.md.
-    if (@hasDecl(T, "serval")) return .{};
-    return .{};
+    comptime {
+        if (@typeInfo(T) != .@"struct" and @typeInfo(T) != .@"union" and @typeInfo(T) != .@"enum")
+            return .{};
+        if (!@hasDecl(T, "serval")) return .{};
+        const m = T.serval;
+        var out: TypeOptions = .{};
+        for (@typeInfo(@TypeOf(m)).@"struct".fields) |f| {
+            if (std.mem.eql(u8, f.name, "fields")) continue;
+            if (!@hasField(TypeOptions, f.name))
+                @compileError("unknown serval option '." ++ f.name ++ "' on " ++ @typeName(T));
+            @field(out, f.name) = @field(m, f.name);
+        }
+        return out;
+    }
+}
+
+// serval-4am
+fn fieldMetaFor(comptime T: type, comptime field_name: []const u8) field_meta.FieldMeta {
+    comptime {
+        if (!@hasDecl(T, "serval")) return .{};
+        const m = T.serval;
+        if (!@hasField(@TypeOf(m), "fields")) return .{};
+        const fs = m.fields;
+        if (!@hasField(@TypeOf(fs), field_name)) return .{};
+        return coerceInto(field_meta.FieldMeta, @field(fs, field_name), T);
+    }
+}
+
+// serval-4am
+fn verifyMetadataFieldKeys(comptime T: type) void {
+    comptime {
+        if (!@hasDecl(T, "serval")) return;
+        const m = T.serval;
+        if (!@hasField(@TypeOf(m), "fields")) return;
+        for (@typeInfo(@TypeOf(m.fields)).@"struct".fields) |mf| {
+            if (!@hasField(T, mf.name))
+                @compileError("serval metadata names field '." ++ mf.name ++
+                    "' which does not exist on " ++ @typeName(T));
+        }
+    }
+}
+
+// serval-4am
+fn coerceInto(comptime Target: type, comptime src: anytype, comptime Owner: type) Target {
+    comptime {
+        var out: Target = .{};
+        for (@typeInfo(@TypeOf(src)).@"struct".fields) |f| {
+            if (!@hasField(Target, f.name))
+                @compileError("unknown serval field rule '." ++ f.name ++ "' on " ++ @typeName(Owner));
+            @field(out, f.name) = @field(src, f.name);
+        }
+        return out;
+    }
 }

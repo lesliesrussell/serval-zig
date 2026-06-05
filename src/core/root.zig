@@ -7,6 +7,8 @@ pub const schema = @import("schema.zig");
 pub const type_info = @import("type_info.zig");
 pub const field_meta = @import("field_meta.zig");
 pub const attributes = @import("attributes.zig");
+// serval-4am
+pub const naming = @import("naming.zig");
 pub const value = @import("value.zig");
 pub const context = @import("context.zig");
 pub const errors = @import("errors.zig");
