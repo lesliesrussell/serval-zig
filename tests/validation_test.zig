@@ -125,6 +125,46 @@ test "multiple violations all reported" {
     try std.testing.expectEqual(@as(usize, 3), report.issues.len);
 }
 
+// serval-bcz
+const Coded = struct {
+    code: []const u8,
+
+    pub const serval = .{
+        .fields = .{ .code = .{ .pattern = "^[A-Z]+-[0-9]+$" } },
+    };
+};
+
+test "pattern: matching string passes" {
+    const v = Coded{ .code = "ABC-123" };
+    const report = try checkAlloc(Coded, &v);
+    defer std.testing.allocator.free(report.issues);
+    try std.testing.expect(report.ok());
+}
+
+test "pattern: non-matching string reported" {
+    const v = Coded{ .code = "abc" };
+    const report = try checkAlloc(Coded, &v);
+    defer std.testing.allocator.free(report.issues);
+    try std.testing.expectEqual(@as(usize, 1), report.issues.len);
+    try std.testing.expectEqual(serval.core.IssueCode.pattern, report.issues[0].code);
+    try std.testing.expectEqualStrings("code", report.issues[0].path.segments[0].field);
+}
+
+test "pattern: invalid regex reported as issue" {
+    const Broken = struct {
+        s: []const u8,
+
+        pub const serval = .{
+            .fields = .{ .s = .{ .pattern = "[unclosed" } },
+        };
+    };
+    const v = Broken{ .s = "anything" };
+    const report = try checkAlloc(Broken, &v);
+    defer std.testing.allocator.free(report.issues);
+    try std.testing.expectEqual(@as(usize, 1), report.issues.len);
+    try std.testing.expectEqual(serval.core.IssueCode.pattern, report.issues[0].code);
+}
+
 // serval-bfp
 const Minor = struct {
     age: u8,

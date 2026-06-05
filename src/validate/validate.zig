@@ -4,6 +4,8 @@
 const std = @import("std");
 const core = @import("serval-core");
 const coercion = @import("coercion.zig");
+// serval-bcz
+const mvzr = @import("mvzr");
 
 pub const CheckOptions = struct {
     coercion: coercion.CoercionMode = .none,
@@ -119,7 +121,27 @@ fn checkString(comptime f: core.Field, v: []const u8, ctx: *core.ValidateContext
         .message = "not a valid URL",
         .actual = .{ .string = v },
     });
-    // TODO(serval): .pattern needs a regex engine decision (none in std).
+    // serval-bcz
+    if (m.pattern) |pat| {
+        // TODO(serval): comptime-compile patterns once per type instead of
+        // per check() call.
+        if (mvzr.compile(pat)) |rx| {
+            if (!rx.isMatch(v)) ctx.issue(.{
+                .path = .field(f.name),
+                .code = .pattern,
+                .message = "string does not match pattern",
+                .expected = .{ .string = pat },
+                .actual = .{ .string = v },
+            });
+        } else {
+            ctx.issue(.{
+                .path = .field(f.name),
+                .code = .pattern,
+                .message = "invalid regex in .pattern rule",
+                .expected = .{ .string = pat },
+            });
+        }
+    }
 }
 
 // serval-bfp

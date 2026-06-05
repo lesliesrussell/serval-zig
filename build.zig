@@ -19,6 +19,9 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     validate_mod.addImport("serval-core", core_mod);
+    // serval-bcz: mvzr powers the .pattern string rule
+    const mvzr_dep = b.dependency("mvzr", .{ .target = target, .optimize = optimize });
+    validate_mod.addImport("mvzr", mvzr_dep.module("mvzr"));
 
     // Reader/writer-facing encode/decode interfaces and allocation strategies.
     const codec_mod = b.addModule("serval-codec", .{

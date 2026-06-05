@@ -3,7 +3,7 @@
 ## Rule taxonomy (v1)
 
 - **Scalar**: `min`, `max`, `gt`, `lt`, `one_of`
-- **String**: `min_len`, `max_len`, `pattern`, `email`, `url`
+- **String**: `min_len`, `max_len`, `pattern` (regex via [mvzr](https://github.com/mnemnion/mvzr); search semantics — anchor with `^...$` for full match), `email`, `url`
 - **Collection**: `min_items`, `max_items`, `unique`
 - **Presence**: `required`, `nonempty`
 - **Cross-field**: custom function hooks at the struct level
