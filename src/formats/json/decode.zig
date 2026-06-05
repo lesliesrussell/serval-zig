@@ -104,10 +104,16 @@ const Decoder = struct {
 
 fn decodeTop(comptime T: type, d: *Decoder) core.DecodeError!T {
     if (@typeInfo(T) == .@"struct") return decodeStruct(T, d, true);
-    return decodeAny(T, d);
+    return decodeAny(T, d, .{});
 }
 
-fn decodeAny(comptime T: type, d: *Decoder) core.DecodeError!T {
+// serval-vw4: type-level policies (bytes_policy, enum_tagging) come from the
+// enclosing struct's options and flow down through optionals and slices.
+fn decodeAny(
+    comptime T: type,
+    d: *Decoder,
+    comptime parent: core.TypeOptions,
+) core.DecodeError!T {
     switch (@typeInfo(T)) {
         .bool => return switch (try nextToken(d)) {
             .true => true,
@@ -130,20 +136,29 @@ fn decodeAny(comptime T: type, d: *Decoder) core.DecodeError!T {
                 _ = try nextToken(d);
                 return null;
             }
-            return try decodeAny(o.child, d);
+            return try decodeAny(o.child, d, parent);
         },
-        .@"enum" => {
-            const s = try stringSlice(d, false);
-            return std.meta.stringToEnum(T, s) orelse error.InvalidEnumTag;
+        .@"enum" => switch (parent.enum_tagging) {
+            .name => {
+                const s = try stringSlice(d, false);
+                return std.meta.stringToEnum(T, s) orelse error.InvalidEnumTag;
+            },
+            .value => {
+                const s = try numberSlice(d);
+                const n = std.fmt.parseInt(@typeInfo(T).@"enum".tag_type, s, 10) catch
+                    return error.InvalidEnumTag;
+                return std.enums.fromInt(T, n) orelse error.InvalidEnumTag;
+            },
         },
         .pointer => |p| {
             if (p.size != .slice)
                 @compileError("serval-json: unsupported pointer type " ++ @typeName(T));
-            if (p.child == u8) return try stringSlice(d, true);
-            return try decodeSlice(p.child, d);
+            if (p.child == u8 and parent.bytes_policy == .string)
+                return try stringSlice(d, true);
+            return try decodeSlice(p.child, d, parent);
         },
         .@"struct" => return decodeStruct(T, d, false),
-        // TODO(serval): tagged unions per UnionTagging policy.
+        // TODO(serval): tagged unions per UnionTagging policy (serval-x9g).
         else => @compileError("serval-json: unsupported type " ++ @typeName(T)),
     }
 }
@@ -166,7 +181,7 @@ fn decodeStruct(comptime T: type, d: *Decoder, comptime is_top: bool) core.Decod
         };
         inline for (S.fields, struct_fields, 0..) |sf, zf, i| {
             if (std.mem.eql(u8, key, sf.wire_name)) {
-                @field(result, zf.name) = try decodeAny(zf.type, d);
+                @field(result, zf.name) = try decodeAny(zf.type, d, S.options);
                 seen[i] = true;
                 if (is_top) {
                     d.present.append(d.allocator, zf.name) catch return error.OutOfMemory;
@@ -206,7 +221,11 @@ fn decodeStruct(comptime T: type, d: *Decoder, comptime is_top: bool) core.Decod
     return result;
 }
 
-fn decodeSlice(comptime Child: type, d: *Decoder) core.DecodeError![]const Child {
+fn decodeSlice(
+    comptime Child: type,
+    d: *Decoder,
+    comptime parent: core.TypeOptions,
+) core.DecodeError![]const Child {
     switch (try nextToken(d)) {
         .array_begin => {},
         else => return error.UnexpectedToken,
@@ -218,7 +237,7 @@ fn decodeSlice(comptime Child: type, d: *Decoder) core.DecodeError![]const Child
             _ = try nextToken(d);
             break;
         }
-        const item = try decodeAny(Child, d);
+        const item = try decodeAny(Child, d, parent);
         list.append(d.allocator, item) catch return error.OutOfMemory;
     }
     return list.toOwnedSlice(d.allocator) catch return error.OutOfMemory;

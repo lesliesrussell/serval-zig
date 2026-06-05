@@ -211,6 +211,117 @@ test "decode: trailing garbage rejected" {
     try std.testing.expectError(error.InvalidSyntax, result);
 }
 
+// serval-vw4
+test "encode honors rename_all wire names and roundtrips" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const Msg = struct {
+        user_id: u64,
+        display_name: []const u8,
+
+        pub const serval = .{ .rename_all = .camel_case };
+    };
+    const msg = Msg{ .user_id = 5, .display_name = "ada" };
+    const encoded = try serval.json.encodeAlloc(Msg, arena.allocator(), msg, .{});
+    try std.testing.expectEqualStrings(
+        \\{"userId":5,"displayName":"ada"}
+    , encoded);
+    try serval.testing.roundtrip.expectRoundtrip(Msg, arena.allocator(), msg);
+}
+
+test "encode nested struct, slices, optional null, enum name" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const Doc = struct {
+        level: enum { low, high },
+        age: ?u8 = null,
+        tags: []const []const u8,
+        inner: struct { x: i32 },
+    };
+    const doc = Doc{ .level = .high, .tags = &.{ "a", "b" }, .inner = .{ .x = -3 } };
+    const encoded = try serval.json.encodeAlloc(Doc, arena.allocator(), doc, .{});
+    try std.testing.expectEqualStrings(
+        \\{"level":"high","age":null,"tags":["a","b"],"inner":{"x":-3}}
+    , encoded);
+}
+
+test "enum_tagging .value roundtrips" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const Job = struct {
+        state: enum(u8) { queued = 0, running = 1, done = 2 },
+
+        pub const serval = .{ .enum_tagging = .value };
+    };
+    const job = Job{ .state = .running };
+    const encoded = try serval.json.encodeAlloc(Job, arena.allocator(), job, .{});
+    try std.testing.expectEqualStrings(
+        \\{"state":1}
+    , encoded);
+    try serval.testing.roundtrip.expectRoundtrip(Job, arena.allocator(), job);
+}
+
+test "bytes_policy .bytes encodes number array and roundtrips" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const Blob = struct {
+        data: []const u8,
+
+        pub const serval = .{ .bytes_policy = .bytes };
+    };
+    const blob = Blob{ .data = &.{ 1, 2, 255 } };
+    const encoded = try serval.json.encodeAlloc(Blob, arena.allocator(), blob, .{});
+    try std.testing.expectEqualStrings(
+        \\{"data":[1,2,255]}
+    , encoded);
+    try serval.testing.roundtrip.expectRoundtrip(Blob, arena.allocator(), blob);
+}
+
+test "encode escapes strings" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const S = struct { s: []const u8 };
+    const v = S{ .s = "a\"b\nc" };
+    const encoded = try serval.json.encodeAlloc(S, arena.allocator(), v, .{});
+    try std.testing.expectEqualStrings(
+        \\{"s":"a\"b\nc"}
+    , encoded);
+    try serval.testing.roundtrip.expectRoundtrip(S, arena.allocator(), v);
+}
+
+test "pretty encode" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const P = struct { x: i32, tags: []const i32 };
+    const encoded = try serval.json.encodeAlloc(P, arena.allocator(), .{ .x = 1, .tags = &.{ 2, 3 } }, .{ .pretty = true });
+    try std.testing.expectEqualStrings(
+        \\{
+        \\  "x": 1,
+        \\  "tags": [
+        \\    2,
+        \\    3
+        \\  ]
+        \\}
+    , encoded);
+}
+
+test "encode empty containers" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const E = struct { tags: []const i32 = &.{} };
+    const encoded = try serval.json.encodeAlloc(E, arena.allocator(), .{}, .{});
+    try std.testing.expectEqualStrings(
+        \\{"tags":[]}
+    , encoded);
+}
+
 test "json roundtrip" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
