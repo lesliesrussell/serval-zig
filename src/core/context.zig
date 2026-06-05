@@ -7,6 +7,10 @@ const errors = @import("errors.zig");
 pub const ValidateContext = struct {
     allocator: std.mem.Allocator,
     issues: std.ArrayList(errors.ValidationIssue),
+    // serval-r4h
+    /// Zig field names present in the decoded input (top level).
+    /// Populated by the decode pipeline; empty for standalone check().
+    present_fields: []const []const u8 = &.{},
 
     pub fn init(allocator: std.mem.Allocator) ValidateContext {
         return .{ .allocator = allocator, .issues = .empty };
@@ -20,11 +24,13 @@ pub const ValidateContext = struct {
         self.issues.append(self.allocator, i) catch @panic("OOM collecting validation issue");
     }
 
-    /// Whether the named field was present in the input.
-    /// Reserved: presence tracking is wired up by the decode pipeline.
+    // serval-r4h
+    /// Whether the named field was present in the decoded input.
+    /// Always false outside the decode pipeline.
     pub fn has(self: *const ValidateContext, field_name: []const u8) bool {
-        _ = self;
-        _ = field_name;
+        for (self.present_fields) |p| {
+            if (std.mem.eql(u8, p, field_name)) return true;
+        }
         return false;
     }
 

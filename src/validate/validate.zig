@@ -7,6 +7,10 @@ const coercion = @import("coercion.zig");
 
 pub const CheckOptions = struct {
     coercion: coercion.CoercionMode = .none,
+    // serval-r4h
+    /// Zig field names present in decoded input; feeds ValidateContext.has().
+    /// Set by the decode pipeline — leave empty for standalone checks.
+    present_fields: []const []const u8 = &.{},
 };
 
 // serval-bfp
@@ -23,9 +27,10 @@ pub fn check(
     allocator: std.mem.Allocator,
     options: CheckOptions,
 ) !core.ValidationReport {
-    _ = options;
     var ctx = core.ValidateContext.init(allocator);
     errdefer ctx.deinit();
+    // serval-r4h
+    ctx.present_fields = options.present_fields;
 
     const S = core.schemaOf(T);
     inline for (S.fields) |f| {

@@ -70,4 +70,8 @@ pub const DecodeError = error{
     InvalidSyntax,
     Overflow,
     OutOfMemory,
+    // serval-r4h
+    UnknownField,
+    MissingRequiredField,
+    InvalidEnumTag,
 };

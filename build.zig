@@ -37,6 +37,8 @@ pub fn build(b: *std.Build) void {
     });
     json_mod.addImport("serval-core", core_mod);
     json_mod.addImport("serval-codec", codec_mod);
+    // serval-r4h: decode pipeline integrates validation
+    json_mod.addImport("serval-validate", validate_mod);
 
     // Umbrella module: `@import("serval")` re-exports core/validate/codec/json.
     const umbrella = b.addModule("serval", .{
