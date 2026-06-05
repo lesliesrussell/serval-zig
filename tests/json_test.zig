@@ -527,6 +527,60 @@ test "borrowed decode: validation still works when requested" {
     try std.testing.expectError(error.ValidationFailed, result);
 }
 
+// serval-ee8
+test "collect mode: unknown fields captured as Values" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const Known = struct { id: u64 };
+    const dr = try serval.json.decodeResult(Known, arena.allocator(),
+        \\{"id":3,"shoe_size":44,"ratio":1.5,"meta":{"tags":[1,true,null,"s"]}}
+    , .{ .unknown_fields = .collect });
+
+    try std.testing.expectEqual(@as(u64, 3), dr.ok.value.id);
+    const unknown = dr.ok.unknown;
+    try std.testing.expectEqual(@as(usize, 3), unknown.len);
+
+    try std.testing.expectEqualStrings("shoe_size", unknown[0].name);
+    try std.testing.expectEqual(@as(i64, 44), unknown[0].value.int);
+
+    try std.testing.expectEqualStrings("ratio", unknown[1].name);
+    try std.testing.expectEqual(@as(f64, 1.5), unknown[1].value.float);
+
+    try std.testing.expectEqualStrings("meta", unknown[2].name);
+    const meta = unknown[2].value.object;
+    try std.testing.expectEqualStrings("tags", meta[0].name);
+    const tags = meta[0].value.array;
+    try std.testing.expectEqual(@as(i64, 1), tags[0].int);
+    try std.testing.expect(tags[1].bool);
+    try std.testing.expect(tags[2] == .null);
+    try std.testing.expectEqualStrings("s", tags[3].string);
+}
+
+test "collect mode: no unknowns yields empty slice" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const Known = struct { id: u64 };
+    const dr = try serval.json.decodeResult(Known, arena.allocator(),
+        \\{"id":1}
+    , .{ .unknown_fields = .collect });
+    try std.testing.expectEqual(@as(usize, 0), dr.ok.unknown.len);
+}
+
+test "collect mode: nested struct unknowns are skipped not collected" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const Outer = struct { inner: struct { x: i32 } };
+    const dr = try serval.json.decodeResult(Outer, arena.allocator(),
+        \\{"inner":{"x":1,"extra":true},"top_extra":2}
+    , .{ .unknown_fields = .collect });
+    try std.testing.expectEqual(@as(i32, 1), dr.ok.value.inner.x);
+    try std.testing.expectEqual(@as(usize, 1), dr.ok.unknown.len);
+    try std.testing.expectEqualStrings("top_extra", dr.ok.unknown[0].name);
+}
+
 test "json roundtrip" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

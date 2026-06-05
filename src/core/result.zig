@@ -3,6 +3,8 @@
 //! failure.
 
 const errors = @import("errors.zig");
+// serval-ee8
+const value_mod = @import("value.zig");
 
 pub fn DecodeResult(comptime T: type) type {
     return union(enum) {
@@ -17,6 +19,11 @@ pub fn DecodeResult(comptime T: type) type {
         pub const Ok = struct {
             value: T,
             warnings: errors.ValidationReport = .{},
+            // serval-ee8
+            /// Top-level input fields not matching any schema field, when
+            /// decoded with `.unknown_fields = .collect`. Value trees are
+            /// allocator-built — decode with an arena and free wholesale.
+            unknown: []const value_mod.FieldValue = &.{},
         };
     };
 }

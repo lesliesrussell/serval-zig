@@ -26,9 +26,10 @@ pub fn decode(
 ) Error!T {
     const result = try decodeResult(T, allocator, input, options);
     switch (result) {
-        // serval-w98: fast path drops lax warnings.
+        // serval-w98: fast path drops lax warnings and collected unknowns.
         .ok => |ok| {
             allocator.free(ok.warnings.issues);
+            allocator.free(ok.unknown);
             return ok.value;
         },
         .invalid => |report| {
@@ -90,6 +91,10 @@ pub fn decodeResult(
     };
     defer d.scanner.deinit();
     defer d.present.deinit(allocator);
+    // serval-ee8: frees list storage only; collected Value trees are
+    // reachable from the .ok result, or (on invalid/error paths) are
+    // expected to live in a caller arena.
+    defer d.unknown.deinit(allocator);
 
     const value = decodeTop(T, &d) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
@@ -108,6 +113,9 @@ pub fn decodeResult(
         return .{ .invalid = .{ .issues = issues } };
     }
 
+    // serval-ee8
+    const unknown = d.unknown.toOwnedSlice(allocator) catch return error.OutOfMemory;
+
     if (options.validation != .none) {
         const report = validate.check(T, &value, allocator, .{
             .present_fields = d.present.items,
@@ -115,14 +123,15 @@ pub fn decodeResult(
         if (!report.ok()) {
             // serval-w98: lax downgrades constraint failures to warnings on ok.
             if (options.validation == .lax) {
-                return .{ .ok = .{ .value = value, .warnings = report } };
+                return .{ .ok = .{ .value = value, .warnings = report, .unknown = unknown } };
             }
+            allocator.free(unknown);
             return .{ .invalid = report };
         }
         allocator.free(report.issues);
     }
 
-    return .{ .ok = .{ .value = value } };
+    return .{ .ok = .{ .value = value, .unknown = unknown } };
 }
 
 const Decoder = struct {
@@ -132,6 +141,9 @@ const Decoder = struct {
     ctx: *core.ValidateContext,
     /// Zig field names seen at the top level (comptime strings; no copies).
     present: std.ArrayList([]const u8),
+    // serval-ee8
+    /// Top-level unknown fields gathered under .collect.
+    unknown: std.ArrayList(core.FieldValue) = .empty,
 };
 
 fn decodeTop(comptime T: type, d: *Decoder) core.DecodeError!T {
@@ -335,16 +347,31 @@ fn decodeStruct(comptime T: type, d: *Decoder, comptime is_top: bool) core.Decod
             }
         }
         switch (d.options.unknown_fields) {
-            .reject => d.ctx.issue(.{
-                .path = .root,
-                .code = .unknown_field,
-                .message = "unknown field in input",
-            }),
-            // TODO(serval): .collect should stash into a Value map once the
-            // dynamic path lands; treated as .ignore for now.
-            .ignore, .collect => {},
+            .reject => {
+                d.ctx.issue(.{
+                    .path = .root,
+                    .code = .unknown_field,
+                    .message = "unknown field in input",
+                });
+                d.scanner.skipValue() catch |e| return mapScanError(e);
+            },
+            // serval-ee8: collected at the top level only — typed nested
+            // structs have no slot to carry unknowns.
+            .collect => if (is_top) {
+                const owned_key = if (d.options.memory == .owned)
+                    d.allocator.dupe(u8, key) catch return error.OutOfMemory
+                else
+                    key;
+                const val = try decodeValue(d);
+                d.unknown.append(d.allocator, .{
+                    .name = owned_key,
+                    .value = val,
+                }) catch return error.OutOfMemory;
+            } else {
+                d.scanner.skipValue() catch |e| return mapScanError(e);
+            },
+            .ignore => d.scanner.skipValue() catch |e| return mapScanError(e),
         }
-        d.scanner.skipValue() catch |e| return mapScanError(e);
     }
 
     inline for (S.fields, struct_fields, 0..) |sf, zf, i| {
@@ -364,6 +391,64 @@ fn decodeStruct(comptime T: type, d: *Decoder, comptime is_top: bool) core.Decod
         }
     }
     return result;
+}
+
+// serval-ee8
+/// Dynamic decode into the format-neutral core.Value. Used for collected
+/// unknown fields; also the future home of internal/untagged union tagging.
+fn decodeValue(d: *Decoder) core.DecodeError!core.Value {
+    switch (try peek(d)) {
+        .true => {
+            _ = try nextToken(d);
+            return .{ .bool = true };
+        },
+        .false => {
+            _ = try nextToken(d);
+            return .{ .bool = false };
+        },
+        .null => {
+            _ = try nextToken(d);
+            return .null;
+        },
+        .string => return .{ .string = try stringSlice(d, true) },
+        .number => {
+            const s = try numberSlice(d);
+            if (std.fmt.parseInt(i64, s, 10)) |n| return .{ .int = n } else |_| {}
+            const f = std.fmt.parseFloat(f64, s) catch return error.InvalidSyntax;
+            return .{ .float = f };
+        },
+        .array_begin => {
+            _ = try nextToken(d);
+            var items: std.ArrayList(core.Value) = .empty;
+            defer items.deinit(d.allocator);
+            while (try peek(d) != .array_end) {
+                const v = try decodeValue(d);
+                items.append(d.allocator, v) catch return error.OutOfMemory;
+            }
+            _ = try nextToken(d);
+            return .{ .array = items.toOwnedSlice(d.allocator) catch return error.OutOfMemory };
+        },
+        .object_begin => {
+            _ = try nextToken(d);
+            var fields: std.ArrayList(core.FieldValue) = .empty;
+            defer fields.deinit(d.allocator);
+            while (true) {
+                const key = switch (try nextToken(d)) {
+                    .object_end => break,
+                    .string, .allocated_string => |s| if (d.options.memory == .owned)
+                        d.allocator.dupe(u8, s) catch return error.OutOfMemory
+                    else
+                        s,
+                    else => return error.UnexpectedToken,
+                };
+                const v = try decodeValue(d);
+                fields.append(d.allocator, .{ .name = key, .value = v }) catch
+                    return error.OutOfMemory;
+            }
+            return .{ .object = fields.toOwnedSlice(d.allocator) catch return error.OutOfMemory };
+        },
+        else => return error.UnexpectedToken,
+    }
 }
 
 fn decodeSlice(
