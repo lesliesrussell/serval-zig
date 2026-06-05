@@ -442,6 +442,59 @@ test "union variant names honor rename_all" {
     try serval.testing.roundtrip.expectRoundtrip(Cmd, arena.allocator(), cmd);
 }
 
+// serval-0mq
+test "borrowed decode: strings point into the input buffer" {
+    const input = try std.testing.allocator.dupe(u8,
+        \\{"name":"ada","email":"ada@example.com"}
+    );
+    defer std.testing.allocator.free(input);
+
+    const Contact = struct { name: []const u8, email: []const u8 };
+    const b = try serval.json.decodeBorrowed(Contact, std.testing.allocator, input, .{ .validation = .none });
+
+    const lo = @intFromPtr(input.ptr);
+    const hi = lo + input.len;
+    try std.testing.expect(@intFromPtr(b.value.name.ptr) >= lo and @intFromPtr(b.value.name.ptr) < hi);
+    try std.testing.expect(@intFromPtr(b.value.email.ptr) >= lo and @intFromPtr(b.value.email.ptr) < hi);
+    try std.testing.expectEqualStrings("ada", b.value.name);
+}
+
+test "borrowed decode: zero allocations for escape-free flat input" {
+    const Contact = struct { name: []const u8, id: u64, active: bool };
+    // failing_allocator errors on any allocation — decode must not touch it.
+    const b = try serval.json.decodeBorrowed(Contact, std.testing.failing_allocator,
+        \\{"name":"ada","id":1,"active":true}
+    , .{ .validation = .none });
+    try std.testing.expectEqualStrings("ada", b.value.name);
+    try std.testing.expectEqual(@as(u64, 1), b.value.id);
+}
+
+test "borrowed decode: escaped strings fall back to allocation" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const S = struct { s: []const u8 };
+    const b = try serval.json.decodeBorrowed(S, arena.allocator(),
+        \\{"s":"a\nb"}
+    , .{ .validation = .none });
+    try std.testing.expectEqualStrings("a\nb", b.value.s);
+}
+
+test "borrowed decode: validation still works when requested" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const Limited = struct {
+        name: []const u8,
+
+        pub const serval = .{ .fields = .{ .name = .{ .min_len = 2 } } };
+    };
+    const result = serval.json.decodeBorrowed(Limited, arena.allocator(),
+        \\{"name":"a"}
+    , .{});
+    try std.testing.expectError(error.ValidationFailed, result);
+}
+
 test "json roundtrip" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

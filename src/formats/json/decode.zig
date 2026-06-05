@@ -41,6 +41,23 @@ pub fn decode(
     }
 }
 
+// serval-0mq
+/// Borrowed decode: result slices point into `input` wherever the bytes can
+/// be used verbatim — the returned Borrowed(T) is valid ONLY while `input`
+/// is. Escaped strings and non-u8 slices still allocate with `allocator`.
+/// With `.validation = .none` and escape-free flat input, this performs
+/// zero allocations.
+pub fn decodeBorrowed(
+    comptime T: type,
+    allocator: std.mem.Allocator,
+    input: []const u8,
+    options: codec.DecodeOptions,
+) Error!codec.borrow.Borrowed(T) {
+    var opts = options;
+    opts.memory = .borrowed;
+    return .{ .value = try decode(T, allocator, input, opts) };
+}
+
 /// Full decode pipeline: syntax errors land in .decode_error, shape and
 /// constraint failures in .invalid (caller frees report.issues), success
 /// in .ok.
@@ -53,8 +70,15 @@ pub fn decodeResult(
     var ctx = core.ValidateContext.init(allocator);
     defer ctx.deinit();
 
+    // serval-0mq: the scanner's nesting BitStack gets stack memory so value
+    // decoding drives all heap use (zero-alloc borrowed decode stays zero).
+    // The BitStack's ArrayList first grows to cache_line+1 bytes (129), so
+    // 256 here buys ~1000 nesting levels; deeper input fails as OutOfMemory.
+    var nesting_buf: [256]u8 = undefined;
+    var nesting_fba = std.heap.FixedBufferAllocator.init(&nesting_buf);
+
     var d = Decoder{
-        .scanner = std.json.Scanner.initCompleteInput(allocator, input),
+        .scanner = std.json.Scanner.initCompleteInput(nesting_fba.allocator(), input),
         .allocator = allocator,
         .options = options,
         .ctx = &ctx,
@@ -294,7 +318,9 @@ fn decodeStruct(comptime T: type, d: *Decoder, comptime is_top: bool) core.Decod
             if (std.mem.eql(u8, key, sf.wire_name)) {
                 @field(result, zf.name) = try decodeAny(zf.type, d, S.options);
                 seen[i] = true;
-                if (is_top) {
+                // serval-0mq: presence only feeds validation — skip the
+                // allocation entirely when validation is off.
+                if (is_top and d.options.validation != .none) {
                     d.present.append(d.allocator, zf.name) catch return error.OutOfMemory;
                 }
                 continue :key_loop;
@@ -384,6 +410,8 @@ fn stringSlice(d: *Decoder, dupe_for_owned: bool) core.DecodeError![]const u8 {
 
 fn mapScanError(e: anyerror) core.DecodeError {
     return switch (e) {
+        // Note: covers both value-allocator OOM (escaped strings) and the
+        // fixed nesting buffer overflowing past 1024 levels.
         error.OutOfMemory => error.OutOfMemory,
         error.UnexpectedEndOfInput => error.UnexpectedEndOfInput,
         else => error.InvalidSyntax,

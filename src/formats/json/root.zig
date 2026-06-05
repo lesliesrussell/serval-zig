@@ -6,6 +6,8 @@ pub const json = @import("json.zig");
 pub const decode = json.decode;
 // serval-r4h
 pub const decodeResult = json.decodeResult;
+// serval-0mq
+pub const decodeBorrowed = json.decodeBorrowed;
 pub const encodeAlloc = json.encodeAlloc;
 pub const DecodeOptions = json.DecodeOptions;
 pub const EncodeOptions = json.EncodeOptions;

@@ -11,6 +11,8 @@ pub const decode = @import("decode.zig").decode;
 pub const decodeFromSlice = @import("decode.zig").decode;
 // serval-r4h
 pub const decodeResult = @import("decode.zig").decodeResult;
+// serval-0mq
+pub const decodeBorrowed = @import("decode.zig").decodeBorrowed;
 pub const encodeAlloc = @import("encode.zig").encodeAlloc;
 pub const encodeToSlice = @import("encode.zig").encodeAlloc;
 
