@@ -24,6 +24,10 @@ pub const TypeOptions = struct {
     bytes_policy: attributes.BytesPolicy = .string,
     enum_tagging: attributes.EnumTagging = .name,
     union_tagging: attributes.UnionTagging = .external,
+    // serval-x9g
+    /// Key names for .adjacent (and future .internal) union tagging.
+    union_tag_field: []const u8 = "type",
+    union_content_field: []const u8 = "content",
 };
 
 pub fn Schema(comptime T: type) type {

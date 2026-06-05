@@ -158,9 +158,120 @@ fn decodeAny(
             return try decodeSlice(p.child, d, parent);
         },
         .@"struct" => return decodeStruct(T, d, false),
-        // TODO(serval): tagged unions per UnionTagging policy (serval-x9g).
+        // serval-x9g
+        .@"union" => return decodeUnion(T, d),
         else => @compileError("serval-json: unsupported type " ++ @typeName(T)),
     }
+}
+
+// serval-x9g
+fn decodeUnion(comptime T: type, d: *Decoder) core.DecodeError!T {
+    const info = @typeInfo(T).@"union";
+    if (info.tag_type == null)
+        @compileError("serval-json: untagged Zig unions unsupported: " ++ @typeName(T));
+    const opts = core.schemaOf(T).options;
+    return switch (comptime opts.union_tagging) {
+        .external => decodeUnionExternal(T, d, opts),
+        .adjacent => decodeUnionAdjacent(T, d, opts),
+        // Decode can't backtrack the streaming scanner to find the tag mid-
+        // object; lands with the buffered-Value path (serval-ee8).
+        .internal, .untagged => @compileError(
+            "serval-json: " ++ @tagName(opts.union_tagging) ++
+                " union tagging not yet supported: " ++ @typeName(T),
+        ),
+    };
+}
+
+// serval-x9g
+fn decodeUnionExternal(
+    comptime T: type,
+    d: *Decoder,
+    comptime opts: core.TypeOptions,
+) core.DecodeError!T {
+    switch (try peek(d)) {
+        // unit variant: bare string
+        .string => {
+            const s = try stringSlice(d, false);
+            inline for (@typeInfo(T).@"union".fields) |f| {
+                const wire = comptime core.naming.convert(opts.rename_all, f.name);
+                if (f.type == void) {
+                    if (std.mem.eql(u8, s, wire)) return @unionInit(T, f.name, {});
+                }
+            }
+            return error.InvalidEnumTag;
+        },
+        .object_begin => {
+            _ = try nextToken(d);
+            const key = switch (try nextToken(d)) {
+                .string, .allocated_string => |s| s,
+                else => return error.UnexpectedToken,
+            };
+            const result = blk: {
+                inline for (@typeInfo(T).@"union".fields) |f| {
+                    const wire = comptime core.naming.convert(opts.rename_all, f.name);
+                    if (std.mem.eql(u8, key, wire)) {
+                        if (f.type == void) {
+                            switch (try nextToken(d)) {
+                                .null => break :blk @unionInit(T, f.name, {}),
+                                else => return error.UnexpectedToken,
+                            }
+                        }
+                        break :blk @unionInit(T, f.name, try decodeAny(f.type, d, .{}));
+                    }
+                }
+                return error.InvalidEnumTag;
+            };
+            return switch (try nextToken(d)) {
+                .object_end => result,
+                else => error.UnexpectedToken,
+            };
+        },
+        else => return error.UnexpectedToken,
+    }
+}
+
+// serval-x9g
+fn decodeUnionAdjacent(
+    comptime T: type,
+    d: *Decoder,
+    comptime opts: core.TypeOptions,
+) core.DecodeError!T {
+    switch (try nextToken(d)) {
+        .object_begin => {},
+        else => return error.UnexpectedToken,
+    }
+    const tag_key = switch (try nextToken(d)) {
+        .string, .allocated_string => |s| s,
+        else => return error.UnexpectedToken,
+    };
+    if (!std.mem.eql(u8, tag_key, opts.union_tag_field)) return error.UnexpectedToken;
+    const tag = switch (try nextToken(d)) {
+        .string, .allocated_string => |s| s,
+        else => return error.UnexpectedToken,
+    };
+    inline for (@typeInfo(T).@"union".fields) |f| {
+        const wire = comptime core.naming.convert(opts.rename_all, f.name);
+        if (std.mem.eql(u8, tag, wire)) {
+            if (f.type == void) {
+                return switch (try nextToken(d)) {
+                    .object_end => @unionInit(T, f.name, {}),
+                    else => error.UnexpectedToken,
+                };
+            }
+            const content_key = switch (try nextToken(d)) {
+                .string, .allocated_string => |s| s,
+                else => return error.UnexpectedToken,
+            };
+            if (!std.mem.eql(u8, content_key, opts.union_content_field))
+                return error.UnexpectedToken;
+            const payload = try decodeAny(f.type, d, .{});
+            return switch (try nextToken(d)) {
+                .object_end => @unionInit(T, f.name, payload),
+                else => error.UnexpectedToken,
+            };
+        }
+    }
+    return error.InvalidEnumTag;
 }
 
 fn decodeStruct(comptime T: type, d: *Decoder, comptime is_top: bool) core.DecodeError!T {

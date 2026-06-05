@@ -64,7 +64,8 @@ fn encodeAny(
             }
         },
         .@"struct" => try encodeStruct(T, v, e),
-        // TODO(serval): tagged unions per UnionTagging policy (serval-x9g).
+        // serval-x9g
+        .@"union" => try encodeUnion(T, v, e),
         else => @compileError("serval-json: unsupported type " ++ @typeName(T)),
     }
 }
@@ -77,9 +78,7 @@ fn encodeStruct(comptime T: type, v: T, e: *Encoder) WriteError!void {
     inline for (S.fields, struct_fields, 0..) |sf, zf, i| {
         if (i != 0) try e.writer.writeByte(',');
         try newlineIndent(e);
-        try std.json.Stringify.encodeJsonString(sf.wire_name, .{}, e.writer);
-        try e.writer.writeByte(':');
-        if (e.options.pretty) try e.writer.writeByte(' ');
+        try fieldKey(sf.wire_name, e);
         try encodeAny(zf.type, @field(v, zf.name), e, S.options);
     }
     e.depth -= 1;
@@ -103,6 +102,67 @@ fn encodeArray(
     e.depth -= 1;
     if (items.len != 0) try newlineIndent(e);
     try e.writer.writeByte(']');
+}
+
+// serval-x9g
+fn encodeUnion(comptime T: type, v: T, e: *Encoder) WriteError!void {
+    const info = @typeInfo(T).@"union";
+    if (info.tag_type == null)
+        @compileError("serval-json: untagged Zig unions unsupported: " ++ @typeName(T));
+    const opts = core.schemaOf(T).options;
+    switch (comptime opts.union_tagging) {
+        .external => switch (v) {
+            inline else => |payload, tag| {
+                const wire = comptime core.naming.convert(opts.rename_all, @tagName(tag));
+                if (@TypeOf(payload) == void) {
+                    // unit variant: bare string
+                    try std.json.Stringify.encodeJsonString(wire, .{}, e.writer);
+                } else {
+                    try e.writer.writeByte('{');
+                    e.depth += 1;
+                    try newlineIndent(e);
+                    try fieldKey(wire, e);
+                    try encodeAny(@TypeOf(payload), payload, e, .{});
+                    e.depth -= 1;
+                    try newlineIndent(e);
+                    try e.writer.writeByte('}');
+                }
+            },
+        },
+        .adjacent => switch (v) {
+            inline else => |payload, tag| {
+                const wire = comptime core.naming.convert(opts.rename_all, @tagName(tag));
+                try e.writer.writeByte('{');
+                e.depth += 1;
+                try newlineIndent(e);
+                try fieldKey(opts.union_tag_field, e);
+                try std.json.Stringify.encodeJsonString(wire, .{}, e.writer);
+                if (@TypeOf(payload) != void) {
+                    try e.writer.writeByte(',');
+                    try newlineIndent(e);
+                    try fieldKey(opts.union_content_field, e);
+                    try encodeAny(@TypeOf(payload), payload, e, .{});
+                }
+                e.depth -= 1;
+                try newlineIndent(e);
+                try e.writer.writeByte('}');
+            },
+        },
+        // Internal tagging needs the payload fields spliced after the tag —
+        // fine on encode, but decode can't backtrack a streaming scanner, so
+        // both sides land together with the buffered-Value path (serval-ee8).
+        .internal, .untagged => @compileError(
+            "serval-json: " ++ @tagName(opts.union_tagging) ++
+                " union tagging not yet supported: " ++ @typeName(T),
+        ),
+    }
+}
+
+// serval-x9g
+fn fieldKey(key: []const u8, e: *Encoder) WriteError!void {
+    try std.json.Stringify.encodeJsonString(key, .{}, e.writer);
+    try e.writer.writeByte(':');
+    if (e.options.pretty) try e.writer.writeByte(' ');
 }
 
 fn newlineIndent(e: *Encoder) WriteError!void {

@@ -322,6 +322,126 @@ test "encode empty containers" {
     , encoded);
 }
 
+// serval-x9g
+const Event = union(enum) {
+    ping: void,
+    msg: struct { body: []const u8 },
+    count: u32,
+};
+
+test "external union: payload variant roundtrips" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const ev = Event{ .count = 7 };
+    const encoded = try serval.json.encodeAlloc(Event, arena.allocator(), ev, .{});
+    try std.testing.expectEqualStrings(
+        \\{"count":7}
+    , encoded);
+    try serval.testing.roundtrip.expectRoundtrip(Event, arena.allocator(), ev);
+}
+
+test "external union: struct payload roundtrips" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const ev = Event{ .msg = .{ .body = "hi" } };
+    const encoded = try serval.json.encodeAlloc(Event, arena.allocator(), ev, .{});
+    try std.testing.expectEqualStrings(
+        \\{"msg":{"body":"hi"}}
+    , encoded);
+    try serval.testing.roundtrip.expectRoundtrip(Event, arena.allocator(), ev);
+}
+
+test "external union: void variant is a bare string" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const ev = Event{ .ping = {} };
+    const encoded = try serval.json.encodeAlloc(Event, arena.allocator(), ev, .{});
+    try std.testing.expectEqualStrings(
+        \\"ping"
+    , encoded);
+    const decoded = try serval.json.decode(Event, arena.allocator(), encoded, .{});
+    try std.testing.expectEqual(std.meta.Tag(Event).ping, std.meta.activeTag(decoded));
+}
+
+test "external union: unknown variant is decode error" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const result = serval.json.decode(Event, arena.allocator(),
+        \\{"nope":1}
+    , .{});
+    try std.testing.expectError(error.InvalidEnumTag, result);
+}
+
+test "union nested in struct roundtrips" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const Envelope = struct { id: u32, event: Event };
+    const env = Envelope{ .id = 1, .event = .{ .count = 3 } };
+    const encoded = try serval.json.encodeAlloc(Envelope, arena.allocator(), env, .{});
+    try std.testing.expectEqualStrings(
+        \\{"id":1,"event":{"count":3}}
+    , encoded);
+    try serval.testing.roundtrip.expectRoundtrip(Envelope, arena.allocator(), env);
+}
+
+// serval-x9g
+const Adjacent = union(enum) {
+    start: void,
+    move: struct { x: i32, y: i32 },
+
+    pub const serval = .{
+        .union_tagging = .adjacent,
+        .union_tag_field = "t",
+        .union_content_field = "c",
+    };
+};
+
+test "adjacent union: payload variant roundtrips" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const a = Adjacent{ .move = .{ .x = 1, .y = 2 } };
+    const encoded = try serval.json.encodeAlloc(Adjacent, arena.allocator(), a, .{});
+    try std.testing.expectEqualStrings(
+        \\{"t":"move","c":{"x":1,"y":2}}
+    , encoded);
+    try serval.testing.roundtrip.expectRoundtrip(Adjacent, arena.allocator(), a);
+}
+
+test "adjacent union: void variant omits content" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const a = Adjacent{ .start = {} };
+    const encoded = try serval.json.encodeAlloc(Adjacent, arena.allocator(), a, .{});
+    try std.testing.expectEqualStrings(
+        \\{"t":"start"}
+    , encoded);
+    try serval.testing.roundtrip.expectRoundtrip(Adjacent, arena.allocator(), a);
+}
+
+test "union variant names honor rename_all" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const Cmd = union(enum) {
+        go_fast: u8,
+
+        pub const serval = .{ .rename_all = .camel_case };
+    };
+    const cmd = Cmd{ .go_fast = 9 };
+    const encoded = try serval.json.encodeAlloc(Cmd, arena.allocator(), cmd, .{});
+    try std.testing.expectEqualStrings(
+        \\{"goFast":9}
+    , encoded);
+    try serval.testing.roundtrip.expectRoundtrip(Cmd, arena.allocator(), cmd);
+}
+
 test "json roundtrip" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
