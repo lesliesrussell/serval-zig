@@ -26,7 +26,11 @@ pub fn decode(
 ) Error!T {
     const result = try decodeResult(T, allocator, input, options);
     switch (result) {
-        .ok => |v| return v,
+        // serval-w98: fast path drops lax warnings.
+        .ok => |ok| {
+            allocator.free(ok.warnings.issues);
+            return ok.value;
+        },
         .invalid => |report| {
             defer allocator.free(report.issues);
             for (report.issues) |i| {
@@ -104,17 +108,21 @@ pub fn decodeResult(
         return .{ .invalid = .{ .issues = issues } };
     }
 
-    // TODO(serval): .lax should downgrade constraint failures to warnings;
-    // for now it behaves like .strict.
     if (options.validation != .none) {
         const report = validate.check(T, &value, allocator, .{
             .present_fields = d.present.items,
         }) catch return error.OutOfMemory;
-        if (!report.ok()) return .{ .invalid = report };
+        if (!report.ok()) {
+            // serval-w98: lax downgrades constraint failures to warnings on ok.
+            if (options.validation == .lax) {
+                return .{ .ok = .{ .value = value, .warnings = report } };
+            }
+            return .{ .invalid = report };
+        }
         allocator.free(report.issues);
     }
 
-    return .{ .ok = value };
+    return .{ .ok = .{ .value = value } };
 }
 
 const Decoder = struct {

@@ -109,7 +109,8 @@ test "decodeResult: ok variant" {
     const dr = try serval.json.decodeResult(Limits, arena.allocator(),
         \\{"name":"ada"}
     , .{});
-    try std.testing.expectEqualStrings("ada", dr.ok.name);
+    try std.testing.expectEqualStrings("ada", dr.ok.value.name);
+    try std.testing.expect(dr.ok.warnings.ok());
 }
 
 test "decodeResult: invalid on constraint violation" {
@@ -147,6 +148,37 @@ test "decode: strict validation failure surfaces as error" {
         \\{"name":"a"}
     , .{});
     try std.testing.expectError(error.ValidationFailed, result);
+}
+
+// serval-w98
+test "lax validation: value returned with constraint warnings attached" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const dr = try serval.json.decodeResult(Limits, arena.allocator(),
+        \\{"name":"a"}
+    , .{ .validation = .lax });
+    try std.testing.expectEqualStrings("a", dr.ok.value.name);
+    try std.testing.expect(!dr.ok.warnings.ok());
+    try std.testing.expectEqual(serval.core.IssueCode.min_len, dr.ok.warnings.issues[0].code);
+}
+
+test "lax validation: shape failures still invalid" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const dr = try serval.json.decodeResult(Limits, arena.allocator(), "{}", .{ .validation = .lax });
+    try std.testing.expectEqual(serval.core.IssueCode.required, dr.invalid.issues[0].code);
+}
+
+test "lax validation: typed decode returns value despite warnings" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const v = try serval.json.decode(Limits, arena.allocator(),
+        \\{"name":"a"}
+    , .{ .validation = .lax });
+    try std.testing.expectEqualStrings("a", v.name);
 }
 
 test "decode: validation none skips constraints" {
@@ -187,7 +219,7 @@ test "presence tracking feeds ctx.has in custom validators" {
     const with = try serval.json.decodeResult(Profile, arena.allocator(),
         \\{"name":"ada","nickname":"countess"}
     , .{});
-    try std.testing.expectEqualStrings("countess", with.ok.nickname);
+    try std.testing.expectEqualStrings("countess", with.ok.value.nickname);
 }
 
 test "decode: bad enum tag is decode error" {
