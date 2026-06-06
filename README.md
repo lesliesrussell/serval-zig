@@ -4,9 +4,9 @@ Serialization + validation for Zig. Serde/Pydantic-style: schema reflection,
 multiple formats, rich path-aware validation, and explicit allocation modes
 (borrowed / arena / owned).
 
-**Status: v1 surface implemented** — JSON, ZON, and MessagePack backends,
+**Status: v1 surface implemented** — JSON, ZON, MessagePack, and CBOR backends,
 full constraint engine, all four union tagging modes, streaming entry
-points. CBOR and the dynamic `Value`-against-schema API are next.
+points. Remaining horizon: binary-backend dedup and indefinite-length CBOR.
 
 ## Usage
 
@@ -75,6 +75,7 @@ const json_out = try serval.json.encodeAlloc(User, allocator, user, .{ .pretty =
 | `serval-json` | Schema-driven JSON backend |
 | `serval-zon` | ZON backend (std.zon-based; config/metadata use cases) |
 | `serval-msgpack` | MessagePack backend (wire format in-tree) |
+| `serval-cbor` | CBOR backend (RFC 8949, wire format in-tree) |
 | `serval` | Umbrella module re-exporting the above |
 
 See `docs/architecture.md` for the design.

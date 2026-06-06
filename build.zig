@@ -63,6 +63,16 @@ pub fn build(b: *std.Build) void {
     msgpack_mod.addImport("serval-codec", codec_mod);
     msgpack_mod.addImport("serval-validate", validate_mod);
 
+    // serval-7jg: CBOR backend (RFC 8949, wire format in-tree).
+    const cbor_mod = b.addModule("serval-cbor", .{
+        .root_source_file = b.path("src/formats/cbor/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    cbor_mod.addImport("serval-core", core_mod);
+    cbor_mod.addImport("serval-codec", codec_mod);
+    cbor_mod.addImport("serval-validate", validate_mod);
+
     // Umbrella module: `@import("serval")` re-exports core/validate/codec/json.
     const umbrella = b.addModule("serval", .{
         .root_source_file = b.path("src/serval.zig"),
@@ -77,6 +87,8 @@ pub fn build(b: *std.Build) void {
     umbrella.addImport("serval-zon", zon_mod);
     // serval-bfi
     umbrella.addImport("serval-msgpack", msgpack_mod);
+    // serval-7jg
+    umbrella.addImport("serval-cbor", cbor_mod);
 
     // Tests
     const test_step = b.step("test", "Run unit tests");
@@ -88,6 +100,8 @@ pub fn build(b: *std.Build) void {
         "tests/zon_test.zig",
         // serval-bfi
         "tests/msgpack_test.zig",
+        // serval-7jg
+        "tests/cbor_test.zig",
         // serval-1f7
         "tests/fuzz_test.zig",
     };

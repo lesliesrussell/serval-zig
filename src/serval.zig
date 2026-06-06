@@ -14,6 +14,8 @@ pub const json = @import("serval-json");
 pub const zon = @import("serval-zon");
 // serval-bfi
 pub const msgpack = @import("serval-msgpack");
+// serval-7jg
+pub const cbor = @import("serval-cbor");
 
 pub const derive = @import("derive/derive.zig");
 

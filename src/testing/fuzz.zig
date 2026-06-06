@@ -6,6 +6,8 @@
 const std = @import("std");
 const json = @import("serval-json");
 const msgpack = @import("serval-msgpack");
+// serval-7jg
+const cbor = @import("serval-cbor");
 
 /// Exercises schema features: renames, constraints, optionals, defaults,
 /// nesting, slices, enums.
@@ -38,4 +40,8 @@ pub fn decodeAllBackends(gpa: std.mem.Allocator, input: []const u8) void {
     _ = msgpack.decode(Target, a, input, .{}) catch {};
     _ = msgpack.decode(Target, a, input, .{ .unknown_fields = .collect, .validation = .lax }) catch {};
     _ = msgpack.decodeValue(a, input, .{}) catch {};
+    // serval-7jg
+    _ = cbor.decode(Target, a, input, .{}) catch {};
+    _ = cbor.decode(Target, a, input, .{ .unknown_fields = .collect, .validation = .lax }) catch {};
+    _ = cbor.decodeValue(a, input, .{}) catch {};
 }
