@@ -1,0 +1,17 @@
+// serval-9kw
+//! serval-zon: ZON backend, bootstrapped on std.zon (config and metadata
+//! are the driving use case). Bootstrap caveats vs serval-json:
+//! - field names are Zig names (ZON keys are identifiers; rename metadata
+//!   does not apply)
+//! - shape failures (missing/unknown fields) surface as InvalidSyntax
+//!   decode errors, not path-aware report issues
+//! - no presence tracking (ctx.has() is always false)
+//! - no borrowed mode (std.zon requires a sentinel-terminated copy)
+//! Constraint validation integrates exactly like serval-json.
+
+pub const zon = @import("zon.zig");
+pub const decode = zon.decode;
+pub const decodeResult = zon.decodeResult;
+pub const encodeAlloc = zon.encodeAlloc;
+pub const DecodeOptions = zon.DecodeOptions;
+pub const EncodeOptions = zon.EncodeOptions;

@@ -43,6 +43,16 @@ pub fn build(b: *std.Build) void {
     // serval-r4h: decode pipeline integrates validation
     json_mod.addImport("serval-validate", validate_mod);
 
+    // serval-9kw: ZON backend (config/metadata use cases).
+    const zon_mod = b.addModule("serval-zon", .{
+        .root_source_file = b.path("src/formats/zon/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    zon_mod.addImport("serval-core", core_mod);
+    zon_mod.addImport("serval-codec", codec_mod);
+    zon_mod.addImport("serval-validate", validate_mod);
+
     // Umbrella module: `@import("serval")` re-exports core/validate/codec/json.
     const umbrella = b.addModule("serval", .{
         .root_source_file = b.path("src/serval.zig"),
@@ -53,6 +63,8 @@ pub fn build(b: *std.Build) void {
     umbrella.addImport("serval-validate", validate_mod);
     umbrella.addImport("serval-codec", codec_mod);
     umbrella.addImport("serval-json", json_mod);
+    // serval-9kw
+    umbrella.addImport("serval-zon", zon_mod);
 
     // Tests
     const test_step = b.step("test", "Run unit tests");
@@ -60,6 +72,8 @@ pub fn build(b: *std.Build) void {
         "tests/schema_test.zig",
         "tests/validation_test.zig",
         "tests/json_test.zig",
+        // serval-9kw
+        "tests/zon_test.zig",
     };
     for (test_files) |tf| {
         const t = b.addTest(.{

@@ -10,6 +10,8 @@ pub const core = @import("serval-core");
 pub const validate = @import("serval-validate");
 pub const codec = @import("serval-codec");
 pub const json = @import("serval-json");
+// serval-9kw
+pub const zon = @import("serval-zon");
 
 pub const derive = @import("derive/derive.zig");
 
