@@ -735,6 +735,45 @@ test "measureEncodedLen matches encodeAlloc" {
     try std.testing.expectEqual(encoded.len, serval.json.measureEncodedLen(User, user, .{}));
 }
 
+// serval-l3p
+test "decodeValue: public dynamic decode" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const v = try serval.json.decodeValue(arena.allocator(),
+        \\{"id":3,"name":"ada","tags":[1,2.5,true,null]}
+    , .{});
+    const obj = v.object;
+    try std.testing.expectEqualStrings("id", obj[0].name);
+    try std.testing.expectEqual(@as(i64, 3), obj[0].value.int);
+    try std.testing.expectEqualStrings("ada", obj[1].value.string);
+    const tags = obj[2].value.array;
+    try std.testing.expectEqual(@as(i64, 1), tags[0].int);
+    try std.testing.expectEqual(@as(f64, 2.5), tags[1].float);
+    try std.testing.expect(tags[2].bool);
+    try std.testing.expect(tags[3] == .null);
+}
+
+test "decodeValue: trailing garbage rejected" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const result = serval.json.decodeValue(arena.allocator(), "1 2", .{});
+    try std.testing.expectError(error.InvalidSyntax, result);
+}
+
+test "schema-driven flow: decodeValue then valueAgainstSchema" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const dyn = try serval.json.decodeValue(arena.allocator(),
+        \\{"name":"a"}
+    , .{});
+    const report = try serval.validate.valueAgainstSchema(Limits, dyn, arena.allocator(), .{});
+    try std.testing.expect(!report.ok());
+    try std.testing.expectEqual(serval.core.IssueCode.min_len, report.issues[0].code);
+}
+
 test "json roundtrip" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

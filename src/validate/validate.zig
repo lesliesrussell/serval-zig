@@ -46,6 +46,151 @@ pub fn check(
     return .{ .issues = issues };
 }
 
+// serval-l3p
+/// Validate an untyped core.Value tree against Schema(T): shape
+/// (invalid_type / required / unknown_field) plus the same constraint rules
+/// as check(). Paths are innermost-field-level. Union payloads are
+/// shallow-checked (shape only at the union node).
+pub fn valueAgainstSchema(
+    comptime T: type,
+    value: core.Value,
+    allocator: std.mem.Allocator,
+    options: CheckOptions,
+) error{OutOfMemory}!core.ValidationReport {
+    _ = options;
+    var ctx = core.ValidateContext.init(allocator);
+    errdefer ctx.deinit();
+    if (@typeInfo(T) == .@"struct") {
+        checkStructNode(T, value, &ctx);
+    } else {
+        checkFieldNode(T, .{ .name = "value", .wire_name = "value" }, value, &ctx, .{});
+    }
+    const issues = try ctx.issues.toOwnedSlice(ctx.allocator);
+    return .{ .issues = issues };
+}
+
+// serval-l3p
+fn checkStructNode(comptime T: type, v: core.Value, ctx: *core.ValidateContext) void {
+    const obj = switch (v) {
+        .object => |o| o,
+        else => {
+            ctx.issue(.{ .path = .root, .code = .invalid_type, .message = "expected object" });
+            return;
+        },
+    };
+    const S = core.schemaOf(T);
+    const struct_fields = @typeInfo(T).@"struct".fields;
+
+    outer: for (obj) |fv| {
+        inline for (S.fields) |sf| {
+            if (std.mem.eql(u8, fv.name, sf.wire_name)) continue :outer;
+        }
+        ctx.issue(.{ .path = .root, .code = .unknown_field, .message = "unknown field in value" });
+    }
+
+    inline for (S.fields, struct_fields) |sf, zf| {
+        const found: ?core.Value = blk: {
+            for (obj) |fv| {
+                if (std.mem.eql(u8, fv.name, sf.wire_name)) break :blk fv.value;
+            }
+            break :blk null;
+        };
+        if (found) |fval| {
+            checkFieldNode(zf.type, sf, fval, ctx, S.options);
+        } else if (zf.defaultValue() == null and @typeInfo(zf.type) != .optional) {
+            ctx.issue(.{ .path = .field(sf.name), .code = .required, .message = "missing required field" });
+        }
+    }
+}
+
+// serval-l3p
+fn checkFieldNode(
+    comptime FT: type,
+    comptime sf: core.Field,
+    v: core.Value,
+    ctx: *core.ValidateContext,
+    comptime parent: core.TypeOptions,
+) void {
+    switch (@typeInfo(FT)) {
+        .optional => |o| {
+            if (v == .null) return;
+            checkFieldNode(o.child, sf, v, ctx, parent);
+        },
+        .bool => if (v != .bool) invalidType(sf, ctx, "expected bool"),
+        .int => switch (v) {
+            .int => |n| checkScalar(sf, n, ctx),
+            else => invalidType(sf, ctx, "expected integer"),
+        },
+        .float => switch (v) {
+            .float => |fl| checkScalarFloat(sf, fl, ctx),
+            .int => |n| checkScalarFloat(sf, @as(f64, @floatFromInt(n)), ctx),
+            else => invalidType(sf, ctx, "expected number"),
+        },
+        .@"enum" => switch (parent.enum_tagging) {
+            .name => switch (v) {
+                .string => |s| if (std.meta.stringToEnum(FT, s) == null)
+                    invalidType(sf, ctx, "not a valid enum tag"),
+                else => invalidType(sf, ctx, "expected enum tag string"),
+            },
+            .value => switch (v) {
+                .int => |n| if (std.enums.fromInt(FT, n) == null)
+                    invalidType(sf, ctx, "not a valid enum value"),
+                else => invalidType(sf, ctx, "expected enum tag integer"),
+            },
+        },
+        .pointer => |p| {
+            if (p.size != .slice) return;
+            if (p.child == u8 and parent.bytes_policy == .string) {
+                switch (v) {
+                    .string, .bytes => |s| checkString(sf, s, ctx),
+                    else => invalidType(sf, ctx, "expected string"),
+                }
+                return;
+            }
+            if (p.child == u8) {
+                switch (v) {
+                    .string, .bytes => {},
+                    else => invalidType(sf, ctx, "expected bytes"),
+                }
+                return;
+            }
+            switch (v) {
+                .array => |items| {
+                    const m = sf.meta;
+                    if (m.min_items) |lim| if (items.len < lim) ctx.issue(.{
+                        .path = .field(sf.name),
+                        .code = .min_items,
+                        .message = "fewer items than min_items",
+                    });
+                    if (m.max_items) |lim| if (items.len > lim) ctx.issue(.{
+                        .path = .field(sf.name),
+                        .code = .max_items,
+                        .message = "more items than max_items",
+                    });
+                    // Elements: shape only — field constraints don't apply
+                    // to individual elements. (.unique is skipped on the
+                    // dynamic path: Value equality semantics are undefined.)
+                    const element_field = comptime core.Field{
+                        .name = sf.name,
+                        .wire_name = sf.wire_name,
+                    };
+                    for (items) |item| checkFieldNode(p.child, element_field, item, ctx, parent);
+                },
+                else => invalidType(sf, ctx, "expected array"),
+            }
+        },
+        .@"struct" => checkStructNode(FT, v, ctx),
+        // TODO(serval): deep union shape checks per tagging mode.
+        .@"union" => {},
+        else => {},
+    }
+}
+
+// serval-l3p
+fn invalidType(comptime sf: core.Field, ctx: *core.ValidateContext, message: []const u8) void {
+    ctx.issue(.{ .path = .field(sf.name), .code = .invalid_type, .message = message });
+}
+
 // serval-bfp
 fn checkValue(comptime f: core.Field, v: anytype, ctx: *core.ValidateContext) void {
     const V = @TypeOf(v);

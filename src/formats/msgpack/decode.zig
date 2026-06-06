@@ -58,6 +58,32 @@ pub fn decodeFromReader(
     return decode(T, allocator, input, opts);
 }
 
+// serval-l3p
+/// Public dynamic decode: the whole document as a format-neutral
+/// core.Value tree. Memory rules match decode(); pass an arena.
+pub fn decodeValueSlice(
+    allocator: std.mem.Allocator,
+    input: []const u8,
+    options: codec.DecodeOptions,
+) core.DecodeError!core.Value {
+    var ctx = core.ValidateContext.init(allocator);
+    defer ctx.deinit();
+
+    var d = Decoder{
+        .buf = input,
+        .allocator = allocator,
+        .options = options,
+        .ctx = &ctx,
+        .present = .empty,
+    };
+    defer d.present.deinit(allocator);
+    defer d.unknown.deinit(allocator);
+
+    const v = try decodeValue(&d);
+    if (d.pos != d.buf.len) return error.UnexpectedToken;
+    return v;
+}
+
 pub fn decodeResult(
     comptime T: type,
     allocator: std.mem.Allocator,

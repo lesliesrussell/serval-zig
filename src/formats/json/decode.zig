@@ -108,6 +108,37 @@ pub fn decodeResult(
     return finishDecode(T, allocator, options, &d, &ctx);
 }
 
+// serval-l3p
+/// Public dynamic decode: the whole document as a format-neutral
+/// core.Value tree (schema-driven workflows, diagnostics, transcoding).
+/// Memory rules match decode(); pass an arena.
+pub fn decodeValueSlice(
+    allocator: std.mem.Allocator,
+    input: []const u8,
+    options: codec.DecodeOptions,
+) core.DecodeError!core.Value {
+    var ctx = core.ValidateContext.init(allocator);
+    defer ctx.deinit();
+
+    var nesting_buf: [256]u8 = undefined;
+    var nesting_fba = std.heap.FixedBufferAllocator.init(&nesting_buf);
+
+    var d = Decoder(std.json.Scanner){
+        .scanner = std.json.Scanner.initCompleteInput(nesting_fba.allocator(), input),
+        .allocator = allocator,
+        .options = options,
+        .ctx = &ctx,
+        .present = .empty,
+    };
+    defer d.scanner.deinit();
+    defer d.present.deinit(allocator);
+    defer d.unknown.deinit(allocator);
+
+    const v = try decodeValue(&d);
+    if (try nextToken(&d) != .end_of_document) return error.InvalidSyntax;
+    return v;
+}
+
 // serval-x09
 /// Streaming variants of decode/decodeResult over std.Io.Reader. The
 /// reader is tokenized incrementally via std.json.Reader; nesting

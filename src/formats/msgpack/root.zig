@@ -8,6 +8,8 @@ pub const msgpack = @import("msgpack.zig");
 pub const decode = msgpack.decode;
 pub const decodeResult = msgpack.decodeResult;
 pub const decodeBorrowed = msgpack.decodeBorrowed;
+// serval-l3p
+pub const decodeValue = msgpack.decodeValue;
 pub const decodeFromReader = msgpack.decodeFromReader;
 pub const encodeAlloc = msgpack.encodeAlloc;
 pub const encodeToWriter = msgpack.encodeToWriter;

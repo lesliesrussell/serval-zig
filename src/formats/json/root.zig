@@ -8,6 +8,8 @@ pub const decode = json.decode;
 pub const decodeResult = json.decodeResult;
 // serval-0mq
 pub const decodeBorrowed = json.decodeBorrowed;
+// serval-l3p
+pub const decodeValue = json.decodeValue;
 // serval-x09
 pub const decodeFromReader = json.decodeFromReader;
 pub const decodeResultFromReader = json.decodeResultFromReader;

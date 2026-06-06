@@ -11,5 +11,7 @@ pub const path = @import("path.zig");
 
 pub const check = validate.check;
 pub const CheckOptions = validate.CheckOptions;
+// serval-l3p
+pub const valueAgainstSchema = validate.valueAgainstSchema;
 pub const CoercionMode = coercion.CoercionMode;
 pub const Constraint = constraint.Constraint;

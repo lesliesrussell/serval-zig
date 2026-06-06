@@ -13,6 +13,8 @@ pub const decodeFromSlice = @import("decode.zig").decode;
 pub const decodeResult = @import("decode.zig").decodeResult;
 // serval-0mq
 pub const decodeBorrowed = @import("decode.zig").decodeBorrowed;
+// serval-l3p
+pub const decodeValue = @import("decode.zig").decodeValueSlice;
 // serval-x09
 pub const decodeFromReader = @import("decode.zig").decodeFromReader;
 pub const decodeResultFromReader = @import("decode.zig").decodeResultFromReader;

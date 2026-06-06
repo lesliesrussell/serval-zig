@@ -187,6 +187,103 @@ test "float: in-range value passes" {
     try std.testing.expect(report.ok());
 }
 
+// serval-l3p
+fn vObj(comptime fields: []const serval.core.FieldValue) serval.core.Value {
+    return .{ .object = fields };
+}
+
+test "valueAgainstSchema: valid object passes" {
+    const v = vObj(&.{
+        .{ .name = "name", .value = .{ .string = "ada" } },
+        .{ .name = "age", .value = .{ .int = 30 } },
+    });
+    const Person = struct {
+        name: []const u8,
+        age: ?u8 = null,
+
+        pub const serval = .{ .fields = .{ .name = .{ .min_len = 2 }, .age = .{ .max = 120 } } };
+    };
+    const report = try serval.validate.valueAgainstSchema(Person, v, std.testing.allocator, .{});
+    defer std.testing.allocator.free(report.issues);
+    try std.testing.expect(report.ok());
+}
+
+test "valueAgainstSchema: type mismatch, missing, unknown, constraint" {
+    const Person = struct {
+        name: []const u8,
+        age: u8,
+
+        pub const serval = .{ .fields = .{ .name = .{ .min_len = 2 } } };
+    };
+
+    // wrong type for age
+    var report = try serval.validate.valueAgainstSchema(Person, vObj(&.{
+        .{ .name = "name", .value = .{ .string = "ada" } },
+        .{ .name = "age", .value = .{ .string = "old" } },
+    }), std.testing.allocator, .{});
+    try std.testing.expectEqual(serval.core.IssueCode.invalid_type, report.issues[0].code);
+    try std.testing.expectEqualStrings("age", report.issues[0].path.segments[0].field);
+    std.testing.allocator.free(report.issues);
+
+    // missing required age
+    report = try serval.validate.valueAgainstSchema(Person, vObj(&.{
+        .{ .name = "name", .value = .{ .string = "ada" } },
+    }), std.testing.allocator, .{});
+    try std.testing.expectEqual(serval.core.IssueCode.required, report.issues[0].code);
+    std.testing.allocator.free(report.issues);
+
+    // unknown field
+    report = try serval.validate.valueAgainstSchema(Person, vObj(&.{
+        .{ .name = "name", .value = .{ .string = "ada" } },
+        .{ .name = "age", .value = .{ .int = 30 } },
+        .{ .name = "shoe", .value = .{ .int = 44 } },
+    }), std.testing.allocator, .{});
+    try std.testing.expectEqual(serval.core.IssueCode.unknown_field, report.issues[0].code);
+    std.testing.allocator.free(report.issues);
+
+    // constraint violation through the dynamic path
+    report = try serval.validate.valueAgainstSchema(Person, vObj(&.{
+        .{ .name = "name", .value = .{ .string = "a" } },
+        .{ .name = "age", .value = .{ .int = 30 } },
+    }), std.testing.allocator, .{});
+    defer std.testing.allocator.free(report.issues);
+    try std.testing.expectEqual(serval.core.IssueCode.min_len, report.issues[0].code);
+}
+
+test "valueAgainstSchema: nested, arrays, enums, wire names" {
+    const Doc = struct {
+        level: enum { low, high },
+        items: []const i64,
+        inner: struct { x: i32 },
+        user_id: u64,
+
+        pub const serval = .{
+            .rename_all = .camel_case,
+            .fields = .{ .items = .{ .max_items = 2 } },
+        };
+    };
+
+    // valid shape uses camelCase wire names
+    var report = try serval.validate.valueAgainstSchema(Doc, vObj(&.{
+        .{ .name = "level", .value = .{ .string = "high" } },
+        .{ .name = "items", .value = .{ .array = &.{.{ .int = 1 }} } },
+        .{ .name = "inner", .value = vObj(&.{.{ .name = "x", .value = .{ .int = -2 } }}) },
+        .{ .name = "userId", .value = .{ .int = 9 } },
+    }), std.testing.allocator, .{});
+    try std.testing.expect(report.ok());
+    std.testing.allocator.free(report.issues);
+
+    // bad enum tag + too many items + nested type error
+    report = try serval.validate.valueAgainstSchema(Doc, vObj(&.{
+        .{ .name = "level", .value = .{ .string = "medium" } },
+        .{ .name = "items", .value = .{ .array = &.{ .{ .int = 1 }, .{ .int = 2 }, .{ .int = 3 } } } },
+        .{ .name = "inner", .value = vObj(&.{.{ .name = "x", .value = .{ .bool = true } }}) },
+        .{ .name = "userId", .value = .{ .int = 9 } },
+    }), std.testing.allocator, .{});
+    defer std.testing.allocator.free(report.issues);
+    try std.testing.expectEqual(@as(usize, 3), report.issues.len);
+}
+
 // serval-bfp
 const Minor = struct {
     age: u8,
