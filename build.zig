@@ -53,6 +53,16 @@ pub fn build(b: *std.Build) void {
     zon_mod.addImport("serval-codec", codec_mod);
     zon_mod.addImport("serval-validate", validate_mod);
 
+    // serval-bfi: MessagePack backend (wire format in-tree).
+    const msgpack_mod = b.addModule("serval-msgpack", .{
+        .root_source_file = b.path("src/formats/msgpack/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    msgpack_mod.addImport("serval-core", core_mod);
+    msgpack_mod.addImport("serval-codec", codec_mod);
+    msgpack_mod.addImport("serval-validate", validate_mod);
+
     // Umbrella module: `@import("serval")` re-exports core/validate/codec/json.
     const umbrella = b.addModule("serval", .{
         .root_source_file = b.path("src/serval.zig"),
@@ -65,6 +75,8 @@ pub fn build(b: *std.Build) void {
     umbrella.addImport("serval-json", json_mod);
     // serval-9kw
     umbrella.addImport("serval-zon", zon_mod);
+    // serval-bfi
+    umbrella.addImport("serval-msgpack", msgpack_mod);
 
     // Tests
     const test_step = b.step("test", "Run unit tests");
@@ -74,6 +86,8 @@ pub fn build(b: *std.Build) void {
         "tests/json_test.zig",
         // serval-9kw
         "tests/zon_test.zig",
+        // serval-bfi
+        "tests/msgpack_test.zig",
     };
     for (test_files) |tf| {
         const t = b.addTest(.{

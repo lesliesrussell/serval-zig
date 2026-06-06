@@ -12,6 +12,8 @@ pub const codec = @import("serval-codec");
 pub const json = @import("serval-json");
 // serval-9kw
 pub const zon = @import("serval-zon");
+// serval-bfi
+pub const msgpack = @import("serval-msgpack");
 
 pub const derive = @import("derive/derive.zig");
 

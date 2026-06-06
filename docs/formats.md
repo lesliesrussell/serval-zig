@@ -20,8 +20,8 @@ std.Io specifics stay isolated in `src/codec/reader.zig` and
 |---|---|
 | JSON | Schema-driven both directions: wire names, bytes/enum policies, all four union tagging modes, presence tracking, borrowed mode |
 | ZON | std.zon-based with full validation integration. Caveats: Zig field names only, shape failures fold into `InvalidSyntax`, no presence tracking, no borrowed mode |
-| MessagePack | Planned (post-v1.1) |
-| CBOR | Planned (post-v1.1) |
+| MessagePack | Wire format in-tree, schema-driven both directions: wire names, native str/bin via bytes_policy, all four union tagging modes, presence tracking, borrowed mode, streaming. Ext types unsupported |
+| CBOR | Planned |
 
 ## Memory modes
 
