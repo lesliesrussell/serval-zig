@@ -429,6 +429,8 @@ fn decodeStruct(comptime T: type, d: *Decoder, comptime is_top: bool) core.Decod
         inline for (S.fields, struct_fields, 0..) |sf, zf, i| {
             if (std.mem.eql(u8, key, sf.wire_name)) {
                 @field(result, zf.name) = try decodeAny(zf.type, d, S.options);
+                // serval-au2
+                try validate.coercion.applyStringTransforms(sf.meta, zf.type, &@field(result, zf.name), d.allocator);
                 seen[i] = true;
                 if (is_top and d.options.validation != .none) {
                     d.present.append(d.allocator, zf.name) catch return error.OutOfMemory;

@@ -261,6 +261,23 @@ test "msgpack coercion: safe and aggressive" {
     try std.testing.expectEqual(@as(i32, -41), i.n);
 }
 
+// serval-au2
+test "msgpack transforms: trim and lowercase" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const Wire = struct { email: []const u8 };
+    const Login = struct {
+        email: []const u8,
+
+        pub const serval = .{ .fields = .{ .email = .{ .trim = true, .lowercase = true } } };
+    };
+    const encoded = try serval.msgpack.encodeAlloc(Wire, a, .{ .email = "  Ada@X.IO " }, .{});
+    const v = try serval.msgpack.decode(Login, a, encoded, .{});
+    try std.testing.expectEqualStrings("ada@x.io", v.email);
+}
+
 test "msgpack truncated input is decode error" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

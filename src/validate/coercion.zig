@@ -1,7 +1,9 @@
 // serval-15q
-//! Coercion policy and conversion helpers (validation pipeline phase 2).
+//! Coercion policy, conversion helpers, and string transforms
+//! (validation pipeline phase 2).
 
 const std = @import("std");
+const core = @import("serval-core");
 
 pub const CoercionMode = enum {
     /// No conversions; types must match exactly.
@@ -51,4 +53,47 @@ pub fn boolFromInt(n: i128) ?bool {
         1 => true,
         else => null,
     };
+}
+
+// serval-au2
+/// Apply .trim/.lowercase to a string-typed field value in place.
+/// Decode-time only — typed check() and valueAgainstSchema see values
+/// as-is. No-op for non-string types and when no transform is set.
+pub fn applyStringTransforms(
+    comptime meta: core.FieldMeta,
+    comptime FT: type,
+    value: *FT,
+    allocator: std.mem.Allocator,
+) error{OutOfMemory}!void {
+    if (comptime !(meta.trim or meta.lowercase)) return;
+    switch (@typeInfo(FT)) {
+        .optional => |o| {
+            if (value.*) |payload| {
+                var tmp: o.child = payload;
+                try applyStringTransforms(meta, o.child, &tmp, allocator);
+                value.* = tmp;
+            }
+        },
+        .pointer => |p| {
+            if (p.size != .slice or p.child != u8) return;
+            value.* = try transformedString(meta, allocator, value.*);
+        },
+        else => {},
+    }
+}
+
+// serval-au2
+fn transformedString(
+    comptime meta: core.FieldMeta,
+    allocator: std.mem.Allocator,
+    s: []const u8,
+) error{OutOfMemory}![]const u8 {
+    var out = s;
+    if (meta.trim) out = std.mem.trim(u8, out, &std.ascii.whitespace);
+    if (meta.lowercase) {
+        const buf = try allocator.dupe(u8, out);
+        for (buf) |*c| c.* = std.ascii.toLower(c.*);
+        out = buf;
+    }
+    return out;
 }

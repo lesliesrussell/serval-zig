@@ -871,6 +871,66 @@ test "coercion flows into buffered union payloads" {
     try std.testing.expectEqual(@as(f64, 2.5), s.circle.r);
 }
 
+// serval-au2
+const Login = struct {
+    email: []const u8,
+    code: ?[]const u8 = null,
+
+    pub const serval = .{
+        .fields = .{
+            .email = .{ .trim = true, .lowercase = true, .email = true },
+            .code = .{ .trim = true },
+        },
+    };
+};
+
+test "transforms: trim and lowercase before constraints" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    // raw input would fail the .email rule; the transformed value passes
+    const v = try serval.json.decode(Login, arena.allocator(),
+        \\{"email":"  Ada@Example.COM \n","code":" 42 "}
+    , .{});
+    try std.testing.expectEqualStrings("ada@example.com", v.email);
+    try std.testing.expectEqualStrings("42", v.code.?);
+}
+
+test "transforms: trim preserves zero-alloc borrowed decode" {
+    const Tag = struct {
+        name: []const u8,
+
+        pub const serval = .{ .fields = .{ .name = .{ .trim = true } } };
+    };
+    const input =
+        \\{"name":"  ada  "}
+    ;
+    const b = try serval.json.decodeBorrowed(Tag, std.testing.failing_allocator, input, .{ .validation = .none });
+    try std.testing.expectEqualStrings("ada", b.value.name);
+    // trimmed slice still points into the input buffer
+    const lo = @intFromPtr(input.ptr);
+    try std.testing.expect(@intFromPtr(b.value.name.ptr) >= lo and @intFromPtr(b.value.name.ptr) < lo + input.len);
+}
+
+test "transforms: apply on buffered union payloads (fromValue path)" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const Cmd = union(enum) {
+        login: struct {
+            user: []const u8,
+
+            pub const serval = .{ .fields = .{ .user = .{ .trim = true, .lowercase = true } } };
+        },
+
+        pub const serval = .{ .union_tagging = .internal, .union_tag_field = "kind" };
+    };
+    const c = try serval.json.decode(Cmd, arena.allocator(),
+        \\{"kind":"login","user":" ADA "}
+    , .{});
+    try std.testing.expectEqualStrings("ada", c.login.user);
+}
+
 test "json roundtrip" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

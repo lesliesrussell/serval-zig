@@ -472,6 +472,8 @@ fn decodeStruct(comptime T: type, d: anytype, comptime is_top: bool) core.Decode
         inline for (S.fields, struct_fields, 0..) |sf, zf, i| {
             if (std.mem.eql(u8, key, sf.wire_name)) {
                 @field(result, zf.name) = try decodeAny(zf.type, d, S.options);
+                // serval-au2
+                try validate.coercion.applyStringTransforms(sf.meta, zf.type, &@field(result, zf.name), d.allocator);
                 seen[i] = true;
                 // serval-0mq: presence only feeds validation — skip the
                 // allocation entirely when validation is off.

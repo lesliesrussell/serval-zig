@@ -26,4 +26,9 @@ pub const FieldMeta = struct {
     min_items: ?usize = null,
     max_items: ?usize = null,
     unique: bool = false,
+    // serval-au2: string transforms, applied at decode time before
+    // constraints run. trim is allocation-free (sub-slice); lowercase
+    // allocates with the value allocator even in borrowed mode.
+    trim: bool = false,
+    lowercase: bool = false,
 };

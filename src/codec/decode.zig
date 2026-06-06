@@ -156,6 +156,8 @@ fn fromValueStruct(
         };
         if (found) |fval| {
             @field(result, zf.name) = try fromValueOpts(zf.type, allocator, fval, S.options, mode);
+            // serval-au2
+            try validate.coercion.applyStringTransforms(sf.meta, zf.type, &@field(result, zf.name), allocator);
         } else if (zf.defaultValue()) |default| {
             @field(result, zf.name) = default;
         } else if (@typeInfo(zf.type) == .optional) {
