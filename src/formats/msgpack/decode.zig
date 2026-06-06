@@ -159,6 +159,10 @@ fn unwrapResult(
     }
 }
 
+// serval-1f7: containers recurse — a 1-byte fixarray header per level
+// would otherwise turn input length into stack depth.
+const max_nesting = 256;
+
 const Decoder = struct {
     buf: []const u8,
     pos: usize = 0,
@@ -169,6 +173,13 @@ const Decoder = struct {
     present: std.ArrayList([]const u8),
     /// Top-level unknown fields gathered under .collect.
     unknown: std.ArrayList(core.FieldValue) = .empty,
+    // serval-1f7
+    depth: usize = 0,
+
+    fn enterNest(d: *Decoder) core.DecodeError!void {
+        d.depth += 1;
+        if (d.depth > max_nesting) return error.InvalidSyntax;
+    }
 
     fn readByte(d: *Decoder) core.DecodeError!u8 {
         if (d.pos >= d.buf.len) return error.UnexpectedEndOfInput;
@@ -245,10 +256,18 @@ fn skipValue(d: *Decoder) core.DecodeError!void {
     switch (try readHeader(d)) {
         .int, .float, .bool, .nil => {},
         .str, .bin => |n| _ = try d.readSlice(n),
-        .array => |n| for (0..n) |_| try skipValue(d),
-        .map => |n| for (0..n) |_| {
-            try skipValue(d);
-            try skipValue(d);
+        .array => |n| {
+            try d.enterNest();
+            defer d.depth -= 1;
+            for (0..n) |_| try skipValue(d);
+        },
+        .map => |n| {
+            try d.enterNest();
+            defer d.depth -= 1;
+            for (0..n) |_| {
+                try skipValue(d);
+                try skipValue(d);
+            }
         },
     }
 }
@@ -323,6 +342,8 @@ fn decodeSlice(
         .array => |n| n,
         else => return error.UnexpectedToken,
     };
+    try d.enterNest();
+    defer d.depth -= 1;
     const out = d.allocator.alloc(Child, n) catch return error.OutOfMemory;
     for (out) |*slot| slot.* = try decodeAny(Child, d, parent);
     return out;
@@ -333,6 +354,8 @@ fn decodeStruct(comptime T: type, d: *Decoder, comptime is_top: bool) core.Decod
         .map => |n| n,
         else => return error.UnexpectedToken,
     };
+    try d.enterNest();
+    defer d.depth -= 1;
     const S = core.schemaOf(T);
     const struct_fields = @typeInfo(T).@"struct".fields;
     var result: T = undefined;
@@ -422,11 +445,15 @@ fn decodeValue(d: *Decoder) core.DecodeError!core.Value {
                 s };
         },
         .array => |n| {
+            try d.enterNest();
+            defer d.depth -= 1;
             const items = d.allocator.alloc(core.Value, n) catch return error.OutOfMemory;
             for (items) |*slot| slot.* = try decodeValue(d);
             return .{ .array = items };
         },
         .map => |n| {
+            try d.enterNest();
+            defer d.depth -= 1;
             const fields = d.allocator.alloc(core.FieldValue, n) catch return error.OutOfMemory;
             for (fields) |*slot| {
                 const kn = switch (try readHeader(d)) {

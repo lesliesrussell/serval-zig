@@ -88,6 +88,8 @@ pub fn build(b: *std.Build) void {
         "tests/zon_test.zig",
         // serval-bfi
         "tests/msgpack_test.zig",
+        // serval-1f7
+        "tests/fuzz_test.zig",
     };
     for (test_files) |tf| {
         const t = b.addTest(.{
