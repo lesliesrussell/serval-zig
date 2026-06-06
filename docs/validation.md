@@ -3,15 +3,15 @@
 ## Rule taxonomy
 
 - **Scalar**: `min`, `max`, `gt`, `lt` — applied to ints and floats (float
-  bounds are integral-valued; use a custom validator for fractional limits)
+  bounds are integral-valued; use a custom validator for fractional
+  limits); `one_of` — int membership (ints only)
 - **String**: `min_len`, `max_len`, `pattern` (regex via
   [mvzr](https://github.com/mnemnion/mvzr), compiled at comptime — invalid
   patterns are compile errors; search semantics, anchor with `^...$` for
-  full match), `email`, `url`
-- **Collection**: `min_items`, `max_items`, `unique`
+  full match), `email`, `url`, `one_of_str`, `nonempty`
+- **Collection**: `min_items`, `max_items`, `unique`, `nonempty`
 - **Cross-field**: `pub fn servalValidate(ctx, self)` hook on the struct
-- Planned: `one_of`, `nonempty`, transform/coercion rules (`trim`,
-  `lowercase`, policy-gated numeric/string coercion)
+- Planned: transform rules (`trim`, `lowercase`)
 
 ## Struct-level validators
 

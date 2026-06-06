@@ -313,6 +313,82 @@ test "valueAgainstSchema honors coercion mode" {
     try std.testing.expectEqual(serval.core.IssueCode.min, report.issues[0].code);
 }
 
+// serval-elw
+const Plan = struct {
+    tier: u8 = 1,
+    region: []const u8 = "us",
+    tags: []const u32 = &.{0},
+
+    pub const serval = .{
+        .fields = .{
+            .tier = .{ .one_of = &.{ 1, 2, 3 } },
+            .region = .{ .one_of_str = &.{ "us", "eu" } },
+            .tags = .{ .nonempty = true },
+        },
+    };
+};
+
+test "one_of: scalar and string membership" {
+    const ok_plan = Plan{ .tier = 2, .region = "eu" };
+    var report = try checkAlloc(Plan, &ok_plan);
+    try std.testing.expect(report.ok());
+    std.testing.allocator.free(report.issues);
+
+    const bad_tier = Plan{ .tier = 5 };
+    report = try checkAlloc(Plan, &bad_tier);
+    try std.testing.expectEqual(@as(usize, 1), report.issues.len);
+    try std.testing.expectEqual(serval.core.IssueCode.one_of, report.issues[0].code);
+    try std.testing.expectEqualStrings("tier", report.issues[0].path.segments[0].field);
+    std.testing.allocator.free(report.issues);
+
+    const bad_region = Plan{ .region = "jp" };
+    report = try checkAlloc(Plan, &bad_region);
+    defer std.testing.allocator.free(report.issues);
+    try std.testing.expectEqual(serval.core.IssueCode.one_of, report.issues[0].code);
+}
+
+test "nonempty: strings and collections" {
+    const NonEmpty = struct {
+        name: []const u8 = "x",
+        items: []const i64 = &.{0},
+
+        pub const serval = .{
+            .fields = .{
+                .name = .{ .nonempty = true },
+                .items = .{ .nonempty = true },
+            },
+        };
+    };
+
+    const empty_str = NonEmpty{ .name = "" };
+    var report = try checkAlloc(NonEmpty, &empty_str);
+    try std.testing.expectEqual(serval.core.IssueCode.nonempty, report.issues[0].code);
+    std.testing.allocator.free(report.issues);
+
+    const empty_items = NonEmpty{ .items = &.{} };
+    report = try checkAlloc(NonEmpty, &empty_items);
+    defer std.testing.allocator.free(report.issues);
+    try std.testing.expectEqual(serval.core.IssueCode.nonempty, report.issues[0].code);
+}
+
+test "one_of and nonempty on the dynamic path" {
+    var report = try serval.validate.valueAgainstSchema(Plan, vObj(&.{
+        .{ .name = "tier", .value = .{ .int = 9 } },
+        .{ .name = "region", .value = .{ .string = "eu" } },
+        .{ .name = "tags", .value = .{ .array = &.{.{ .int = 1 }} } },
+    }), std.testing.allocator, .{});
+    try std.testing.expectEqual(serval.core.IssueCode.one_of, report.issues[0].code);
+    std.testing.allocator.free(report.issues);
+
+    report = try serval.validate.valueAgainstSchema(Plan, vObj(&.{
+        .{ .name = "tier", .value = .{ .int = 1 } },
+        .{ .name = "region", .value = .{ .string = "us" } },
+        .{ .name = "tags", .value = .{ .array = &.{} } },
+    }), std.testing.allocator, .{});
+    defer std.testing.allocator.free(report.issues);
+    try std.testing.expectEqual(serval.core.IssueCode.nonempty, report.issues[0].code);
+}
+
 // serval-bfp
 const Minor = struct {
     age: u8,

@@ -203,6 +203,12 @@ fn checkFieldNode(
             switch (v) {
                 .array => |items| {
                     const m = sf.meta;
+                    // serval-elw
+                    if (m.nonempty and items.len == 0) ctx.issue(.{
+                        .path = .field(sf.name),
+                        .code = .nonempty,
+                        .message = "collection must not be empty",
+                    });
                     if (m.min_items) |lim| if (items.len < lim) ctx.issue(.{
                         .path = .field(sf.name),
                         .code = .min_items,
@@ -264,6 +270,18 @@ fn checkScalar(comptime f: core.Field, v: anytype, ctx: *core.ValidateContext) v
     if (m.max) |lim| if (x > lim) issueScalar(f, ctx, .max, "value above maximum", lim, v);
     if (m.gt) |lim| if (x <= lim) issueScalar(f, ctx, .gt, "value must be greater", lim, v);
     if (m.lt) |lim| if (x >= lim) issueScalar(f, ctx, .lt, "value must be smaller", lim, v);
+    // serval-elw
+    if (m.one_of) |allowed| {
+        for (allowed) |a| {
+            if (x == a) return;
+        }
+        ctx.issue(.{
+            .path = .field(f.name),
+            .code = .one_of,
+            .message = "value not in allowed set",
+            .actual = if (std.math.cast(i64, v)) |a| .{ .int = a } else null,
+        });
+    }
 }
 
 // serval-yus
@@ -317,6 +335,23 @@ fn issueScalar(
 // serval-bfp
 fn checkString(comptime f: core.Field, v: []const u8, ctx: *core.ValidateContext) void {
     const m = f.meta;
+    // serval-elw
+    if (m.nonempty and v.len == 0) ctx.issue(.{
+        .path = .field(f.name),
+        .code = .nonempty,
+        .message = "string must not be empty",
+    });
+    if (m.one_of_str) |allowed| {
+        const member = for (allowed) |a| {
+            if (std.mem.eql(u8, v, a)) break true;
+        } else false;
+        if (!member) ctx.issue(.{
+            .path = .field(f.name),
+            .code = .one_of,
+            .message = "string not in allowed set",
+            .actual = .{ .string = v },
+        });
+    }
     if (m.min_len) |lim| if (v.len < lim) ctx.issue(.{
         .path = .field(f.name),
         .code = .min_len,
@@ -361,6 +396,12 @@ fn checkString(comptime f: core.Field, v: []const u8, ctx: *core.ValidateContext
 // serval-bfp
 fn checkCollection(comptime f: core.Field, v: anytype, ctx: *core.ValidateContext) void {
     const m = f.meta;
+    // serval-elw
+    if (m.nonempty and v.len == 0) ctx.issue(.{
+        .path = .field(f.name),
+        .code = .nonempty,
+        .message = "collection must not be empty",
+    });
     if (m.min_items) |lim| if (v.len < lim) ctx.issue(.{
         .path = .field(f.name),
         .code = .min_items,
