@@ -1,19 +1,26 @@
 # Validation
 
-## Rule taxonomy (v1)
+## Rule taxonomy
 
-- **Scalar**: `min`, `max`, `gt`, `lt`, `one_of`
-- **String**: `min_len`, `max_len`, `pattern` (regex via [mvzr](https://github.com/mnemnion/mvzr); search semantics — anchor with `^...$` for full match), `email`, `url`
+- **Scalar**: `min`, `max`, `gt`, `lt` — applied to ints and floats (float
+  bounds are integral-valued; use a custom validator for fractional limits)
+- **String**: `min_len`, `max_len`, `pattern` (regex via
+  [mvzr](https://github.com/mnemnion/mvzr), compiled at comptime — invalid
+  patterns are compile errors; search semantics, anchor with `^...$` for
+  full match), `email`, `url`
 - **Collection**: `min_items`, `max_items`, `unique`
-- **Presence**: `required`, `nonempty`
-- **Cross-field**: custom function hooks at the struct level
-- **Transform/coercion**: `trim`, `lowercase`, numeric/string coercion
-  (only when explicitly enabled)
+- **Cross-field**: `pub fn servalValidate(ctx, self)` hook on the struct
+- Planned: `one_of`, `nonempty`, transform/coercion rules (`trim`,
+  `lowercase`, policy-gated numeric/string coercion)
 
 ## Struct-level validators
 
+Declare `pub fn servalValidate` on the type; `ctx.has(name)` reports whether
+a field was present in the decoded input (always false outside the decode
+pipeline):
+
 ```zig
-pub fn validateUser(ctx: *serval.core.ValidateContext, value: *const User) void {
+pub fn servalValidate(ctx: *serval.core.ValidateContext, value: *const User) void {
     if (value.age != null and value.age.? < 18 and !ctx.has("guardian_email")) {
         ctx.issue(.{
             .path = .field("guardian_email"),
