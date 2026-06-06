@@ -148,13 +148,44 @@ fn encodeUnion(comptime T: type, v: T, e: *Encoder) WriteError!void {
                 try e.writer.writeByte('}');
             },
         },
-        // Internal tagging needs the payload fields spliced after the tag —
-        // fine on encode, but decode can't backtrack a streaming scanner, so
-        // both sides land together with the buffered-Value path (serval-ee8).
-        .internal, .untagged => @compileError(
-            "serval-json: " ++ @tagName(opts.union_tagging) ++
-                " union tagging not yet supported: " ++ @typeName(T),
-        ),
+        // serval-plc
+        .internal => switch (v) {
+            inline else => |payload, tag| {
+                const wire = comptime core.naming.convert(opts.rename_all, @tagName(tag));
+                const P = @TypeOf(payload);
+                try e.writer.writeByte('{');
+                e.depth += 1;
+                try newlineIndent(e);
+                try fieldKey(opts.union_tag_field, e);
+                try std.json.Stringify.encodeJsonString(wire, .{}, e.writer);
+                if (P != void) {
+                    if (@typeInfo(P) != .@"struct")
+                        @compileError("serval-json: internal union tagging requires struct or void payloads: " ++ @typeName(T));
+                    const PS = core.schemaOf(P);
+                    const pfields = @typeInfo(P).@"struct".fields;
+                    inline for (PS.fields, pfields) |sf, zf| {
+                        try e.writer.writeByte(',');
+                        try newlineIndent(e);
+                        try fieldKey(sf.wire_name, e);
+                        try encodeAny(zf.type, @field(payload, zf.name), e, PS.options);
+                    }
+                }
+                e.depth -= 1;
+                try newlineIndent(e);
+                try e.writer.writeByte('}');
+            },
+        },
+        // serval-plc: payload encodes bare; unit variants carry no
+        // information and encode as null.
+        .untagged => switch (v) {
+            inline else => |payload| {
+                if (@TypeOf(payload) == void) {
+                    try e.writer.writeAll("null");
+                } else {
+                    try encodeAny(@TypeOf(payload), payload, e, .{});
+                }
+            },
+        },
     }
 }
 

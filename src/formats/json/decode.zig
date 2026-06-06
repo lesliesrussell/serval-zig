@@ -217,12 +217,13 @@ fn decodeUnion(comptime T: type, d: *Decoder) core.DecodeError!T {
     return switch (comptime opts.union_tagging) {
         .external => decodeUnionExternal(T, d, opts),
         .adjacent => decodeUnionAdjacent(T, d, opts),
-        // Decode can't backtrack the streaming scanner to find the tag mid-
-        // object; lands with the buffered-Value path (serval-ee8).
-        .internal, .untagged => @compileError(
-            "serval-json: " ++ @tagName(opts.union_tagging) ++
-                " union tagging not yet supported: " ++ @typeName(T),
-        ),
+        // serval-plc: tag position isn't known up front — buffer the value
+        // tree, then map it. Arena recommended (buffered containers become
+        // garbage after mapping).
+        .internal, .untagged => blk: {
+            const buffered = try decodeValue(d);
+            break :blk codec.fromValue(T, d.allocator, buffered);
+        },
     };
 }
 

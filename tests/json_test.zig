@@ -581,6 +581,119 @@ test "collect mode: nested struct unknowns are skipped not collected" {
     try std.testing.expectEqualStrings("top_extra", dr.ok.unknown[0].name);
 }
 
+// serval-plc
+const Shape = union(enum) {
+    circle: struct { r: f64 },
+    rect: struct { w: f64, h: f64 },
+    point: void,
+
+    pub const serval = .{
+        .union_tagging = .internal,
+        .union_tag_field = "kind",
+    };
+};
+
+test "internal union: encode splices tag into payload" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const s = Shape{ .rect = .{ .w = 2, .h = 3 } };
+    const encoded = try serval.json.encodeAlloc(Shape, arena.allocator(), s, .{});
+    try std.testing.expectEqualStrings(
+        \\{"kind":"rect","w":2,"h":3}
+    , encoded);
+    try serval.testing.roundtrip.expectRoundtrip(Shape, arena.allocator(), s);
+}
+
+test "internal union: tag position independent on decode" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const s = try serval.json.decode(Shape, arena.allocator(),
+        \\{"r":2.5,"kind":"circle"}
+    , .{});
+    try std.testing.expectEqual(@as(f64, 2.5), s.circle.r);
+}
+
+test "internal union: void variant is tag-only object" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const s = Shape{ .point = {} };
+    const encoded = try serval.json.encodeAlloc(Shape, arena.allocator(), s, .{});
+    try std.testing.expectEqualStrings(
+        \\{"kind":"point"}
+    , encoded);
+    try serval.testing.roundtrip.expectRoundtrip(Shape, arena.allocator(), s);
+}
+
+test "internal union: unknown tag is decode error" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const result = serval.json.decode(Shape, arena.allocator(),
+        \\{"kind":"blob"}
+    , .{});
+    try std.testing.expectError(error.InvalidEnumTag, result);
+}
+
+test "internal union: int payload field accepts whole-number JSON" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const s = try serval.json.decode(Shape, arena.allocator(),
+        \\{"kind":"circle","r":2}
+    , .{});
+    try std.testing.expectEqual(@as(f64, 2), s.circle.r);
+}
+
+// serval-plc
+const Mixed = union(enum) {
+    num: i64,
+    words: []const u8,
+    pair: struct { a: i64, b: i64 },
+
+    pub const serval = .{ .union_tagging = .untagged };
+};
+
+test "untagged union: variants matched by shape" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const n = try serval.json.decode(Mixed, arena.allocator(), "42", .{});
+    try std.testing.expectEqual(@as(i64, 42), n.num);
+
+    const w = try serval.json.decode(Mixed, arena.allocator(),
+        \\"hi"
+    , .{});
+    try std.testing.expectEqualStrings("hi", w.words);
+
+    const p = try serval.json.decode(Mixed, arena.allocator(),
+        \\{"a":1,"b":2}
+    , .{});
+    try std.testing.expectEqual(@as(i64, 2), p.pair.b);
+}
+
+test "untagged union: encode emits payload bare" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const m = Mixed{ .pair = .{ .a = 1, .b = 2 } };
+    const encoded = try serval.json.encodeAlloc(Mixed, arena.allocator(), m, .{});
+    try std.testing.expectEqualStrings(
+        \\{"a":1,"b":2}
+    , encoded);
+    try serval.testing.roundtrip.expectRoundtrip(Mixed, arena.allocator(), m);
+}
+
+test "untagged union: no matching variant is decode error" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const result = serval.json.decode(Mixed, arena.allocator(), "true", .{});
+    try std.testing.expectError(error.InvalidEnumTag, result);
+}
+
 test "json roundtrip" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

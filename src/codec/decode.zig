@@ -1,8 +1,233 @@
 // serval-15q
 //! Format-agnostic decode plumbing shared by backends.
-//! Reserved: token-stream → typed-value mapping, presence tracking for
-//! validation, unknown-field policy enforcement.
 
+const std = @import("std");
+const core = @import("serval-core");
 const options = @import("options.zig");
 
 pub const DecodeOptions = options.DecodeOptions;
+
+// serval-plc
+/// Map a dynamic core.Value onto a typed T. Format-neutral: backends buffer
+/// a value tree (e.g. for position-independent union tags) and finish here.
+/// Lenient on unknown object keys; strings are reused from the Value tree
+/// (ownership flows to the result). Container allocations in the source
+/// tree become garbage after mapping — use an arena.
+pub fn fromValue(
+    comptime T: type,
+    allocator: std.mem.Allocator,
+    v: core.Value,
+) core.DecodeError!T {
+    return fromValueOpts(T, allocator, v, .{});
+}
+
+// serval-plc
+pub fn fromValueOpts(
+    comptime T: type,
+    allocator: std.mem.Allocator,
+    v: core.Value,
+    comptime parent: core.TypeOptions,
+) core.DecodeError!T {
+    switch (@typeInfo(T)) {
+        .bool => return switch (v) {
+            .bool => |b| b,
+            else => error.UnexpectedToken,
+        },
+        .int => return switch (v) {
+            .int => |n| std.math.cast(T, n) orelse error.Overflow,
+            else => error.UnexpectedToken,
+        },
+        .float => return switch (v) {
+            .float => |f| @floatCast(f),
+            .int => |n| @floatFromInt(n),
+            else => error.UnexpectedToken,
+        },
+        .optional => |o| return switch (v) {
+            .null => null,
+            else => try fromValueOpts(o.child, allocator, v, parent),
+        },
+        .@"enum" => switch (parent.enum_tagging) {
+            .name => return switch (v) {
+                .string => |s| std.meta.stringToEnum(T, s) orelse error.InvalidEnumTag,
+                else => error.UnexpectedToken,
+            },
+            .value => return switch (v) {
+                .int => |n| std.enums.fromInt(T, n) orelse error.InvalidEnumTag,
+                else => error.UnexpectedToken,
+            },
+        },
+        .pointer => |p| {
+            if (p.size != .slice)
+                @compileError("serval-codec: unsupported pointer type " ++ @typeName(T));
+            if (p.child == u8 and parent.bytes_policy == .string) {
+                return switch (v) {
+                    .string, .bytes => |s| s,
+                    else => error.UnexpectedToken,
+                };
+            }
+            const items = switch (v) {
+                .array => |a| a,
+                else => return error.UnexpectedToken,
+            };
+            const out = allocator.alloc(p.child, items.len) catch return error.OutOfMemory;
+            for (items, out) |item, *slot| {
+                slot.* = try fromValueOpts(p.child, allocator, item, parent);
+            }
+            return out;
+        },
+        .@"struct" => return fromValueStruct(T, allocator, v),
+        .@"union" => return fromValueUnion(T, allocator, v),
+        else => @compileError("serval-codec: unsupported type " ++ @typeName(T)),
+    }
+}
+
+// serval-plc
+fn fromValueStruct(
+    comptime T: type,
+    allocator: std.mem.Allocator,
+    v: core.Value,
+) core.DecodeError!T {
+    const obj = switch (v) {
+        .object => |o| o,
+        else => return error.UnexpectedToken,
+    };
+    const S = core.schemaOf(T);
+    const struct_fields = @typeInfo(T).@"struct".fields;
+    var result: T = undefined;
+    inline for (S.fields, struct_fields) |sf, zf| {
+        const found: ?core.Value = blk: {
+            for (obj) |fv| {
+                if (std.mem.eql(u8, fv.name, sf.wire_name)) break :blk fv.value;
+            }
+            break :blk null;
+        };
+        if (found) |fval| {
+            @field(result, zf.name) = try fromValueOpts(zf.type, allocator, fval, S.options);
+        } else if (zf.defaultValue()) |default| {
+            @field(result, zf.name) = default;
+        } else if (@typeInfo(zf.type) == .optional) {
+            @field(result, zf.name) = null;
+        } else {
+            return error.MissingRequiredField;
+        }
+    }
+    return result;
+}
+
+// serval-plc
+fn fromValueUnion(
+    comptime T: type,
+    allocator: std.mem.Allocator,
+    v: core.Value,
+) core.DecodeError!T {
+    const info = @typeInfo(T).@"union";
+    if (info.tag_type == null)
+        @compileError("serval-codec: untagged Zig unions unsupported: " ++ @typeName(T));
+    const opts = core.schemaOf(T).options;
+    switch (comptime opts.union_tagging) {
+        .external => switch (v) {
+            // unit variant as bare string
+            .string => |s| {
+                inline for (info.fields) |f| {
+                    const wire = comptime core.naming.convert(opts.rename_all, f.name);
+                    if (f.type == void) {
+                        if (std.mem.eql(u8, s, wire)) return @unionInit(T, f.name, {});
+                    }
+                }
+                return error.InvalidEnumTag;
+            },
+            .object => |obj| {
+                if (obj.len != 1) return error.UnexpectedToken;
+                inline for (info.fields) |f| {
+                    const wire = comptime core.naming.convert(opts.rename_all, f.name);
+                    if (std.mem.eql(u8, obj[0].name, wire)) {
+                        if (f.type == void) {
+                            return switch (obj[0].value) {
+                                .null => @unionInit(T, f.name, {}),
+                                else => error.UnexpectedToken,
+                            };
+                        }
+                        return @unionInit(T, f.name, try fromValueOpts(f.type, allocator, obj[0].value, .{}));
+                    }
+                }
+                return error.InvalidEnumTag;
+            },
+            else => return error.UnexpectedToken,
+        },
+        .adjacent => {
+            const obj = switch (v) {
+                .object => |o| o,
+                else => return error.UnexpectedToken,
+            };
+            const tag: []const u8 = blk: {
+                for (obj) |fv| {
+                    if (std.mem.eql(u8, fv.name, opts.union_tag_field)) {
+                        switch (fv.value) {
+                            .string => |s| break :blk s,
+                            else => return error.UnexpectedToken,
+                        }
+                    }
+                }
+                return error.UnexpectedToken;
+            };
+            inline for (info.fields) |f| {
+                const wire = comptime core.naming.convert(opts.rename_all, f.name);
+                if (std.mem.eql(u8, tag, wire)) {
+                    if (f.type == void) return @unionInit(T, f.name, {});
+                    for (obj) |fv| {
+                        if (std.mem.eql(u8, fv.name, opts.union_content_field)) {
+                            return @unionInit(T, f.name, try fromValueOpts(f.type, allocator, fv.value, .{}));
+                        }
+                    }
+                    return error.UnexpectedToken;
+                }
+            }
+            return error.InvalidEnumTag;
+        },
+        .internal => {
+            const obj = switch (v) {
+                .object => |o| o,
+                else => return error.UnexpectedToken,
+            };
+            const tag: []const u8 = blk: {
+                for (obj) |fv| {
+                    if (std.mem.eql(u8, fv.name, opts.union_tag_field)) {
+                        switch (fv.value) {
+                            .string => |s| break :blk s,
+                            else => return error.UnexpectedToken,
+                        }
+                    }
+                }
+                return error.UnexpectedToken;
+            };
+            inline for (info.fields) |f| {
+                const wire = comptime core.naming.convert(opts.rename_all, f.name);
+                if (std.mem.eql(u8, tag, wire)) {
+                    if (f.type == void) return @unionInit(T, f.name, {});
+                    if (@typeInfo(f.type) != .@"struct")
+                        @compileError("serval-codec: internal union tagging requires struct or void payloads: " ++ @typeName(T));
+                    // Whole object passed through: the tag key is ignored as
+                    // an unknown by the lenient struct mapper.
+                    return @unionInit(T, f.name, try fromValueStruct(f.type, allocator, v));
+                }
+            }
+            return error.InvalidEnumTag;
+        },
+        // First variant (declaration order) that maps wins — order types
+        // from most to least specific.
+        .untagged => {
+            inline for (info.fields) |f| {
+                if (f.type == void) {
+                    if (v == .null) return @unionInit(T, f.name, {});
+                } else {
+                    const attempt: ?f.type = fromValueOpts(f.type, allocator, v, .{}) catch |err| switch (err) {
+                        error.OutOfMemory => return error.OutOfMemory,
+                        else => null,
+                    };
+                    if (attempt) |payload| return @unionInit(T, f.name, payload);
+                }
+            }
+            return error.InvalidEnumTag;
+        },
+    }
+}

@@ -13,5 +13,7 @@ pub const borrow = @import("borrow.zig");
 pub const alloc = @import("alloc.zig");
 
 pub const MemoryMode = options.MemoryMode;
+// serval-plc
+pub const fromValue = decode.fromValue;
 pub const DecodeOptions = options.DecodeOptions;
 pub const EncodeOptions = options.EncodeOptions;
