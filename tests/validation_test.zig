@@ -284,6 +284,35 @@ test "valueAgainstSchema: nested, arrays, enums, wire names" {
     try std.testing.expectEqual(@as(usize, 3), report.issues.len);
 }
 
+// serval-4tr
+test "valueAgainstSchema honors coercion mode" {
+    const Person = struct {
+        age: u8,
+
+        pub const serval = .{ .fields = .{ .age = .{ .min = 13 } } };
+    };
+    const dyn = vObj(&.{
+        .{ .name = "age", .value = .{ .string = "42" } },
+    });
+
+    // none: type mismatch
+    var report = try serval.validate.valueAgainstSchema(Person, dyn, std.testing.allocator, .{});
+    try std.testing.expectEqual(serval.core.IssueCode.invalid_type, report.issues[0].code);
+    std.testing.allocator.free(report.issues);
+
+    // safe: coerces, then constraints run on the coerced value
+    report = try serval.validate.valueAgainstSchema(Person, dyn, std.testing.allocator, .{ .coercion = .safe });
+    try std.testing.expect(report.ok());
+    std.testing.allocator.free(report.issues);
+
+    // safe + constraint violation on coerced value
+    report = try serval.validate.valueAgainstSchema(Person, vObj(&.{
+        .{ .name = "age", .value = .{ .string = "9" } },
+    }), std.testing.allocator, .{ .coercion = .safe });
+    defer std.testing.allocator.free(report.issues);
+    try std.testing.expectEqual(serval.core.IssueCode.min, report.issues[0].code);
+}
+
 // serval-bfp
 const Minor = struct {
     age: u8,

@@ -8,6 +8,9 @@ const coercion = @import("coercion.zig");
 const mvzr = @import("mvzr");
 
 pub const CheckOptions = struct {
+    // serval-4tr: honored by valueAgainstSchema (dynamic Values can be
+    // coercible); ignored by typed check() — typed values already have
+    // their final types, coercion is a decode-time concern there.
     coercion: coercion.CoercionMode = .none,
     // serval-r4h
     /// Zig field names present in decoded input; feeds ValidateContext.has().
@@ -57,20 +60,21 @@ pub fn valueAgainstSchema(
     allocator: std.mem.Allocator,
     options: CheckOptions,
 ) error{OutOfMemory}!core.ValidationReport {
-    _ = options;
     var ctx = core.ValidateContext.init(allocator);
     errdefer ctx.deinit();
+    // serval-4tr: coercion-aware shape checks — a coercible value passes
+    // and constraints run against the coerced result.
     if (@typeInfo(T) == .@"struct") {
-        checkStructNode(T, value, &ctx);
+        checkStructNode(T, value, &ctx, options.coercion);
     } else {
-        checkFieldNode(T, .{ .name = "value", .wire_name = "value" }, value, &ctx, .{});
+        checkFieldNode(T, .{ .name = "value", .wire_name = "value" }, value, &ctx, .{}, options.coercion);
     }
     const issues = try ctx.issues.toOwnedSlice(ctx.allocator);
     return .{ .issues = issues };
 }
 
 // serval-l3p
-fn checkStructNode(comptime T: type, v: core.Value, ctx: *core.ValidateContext) void {
+fn checkStructNode(comptime T: type, v: core.Value, ctx: *core.ValidateContext, mode: coercion.CoercionMode) void {
     const obj = switch (v) {
         .object => |o| o,
         else => {
@@ -96,7 +100,7 @@ fn checkStructNode(comptime T: type, v: core.Value, ctx: *core.ValidateContext) 
             break :blk null;
         };
         if (found) |fval| {
-            checkFieldNode(zf.type, sf, fval, ctx, S.options);
+            checkFieldNode(zf.type, sf, fval, ctx, S.options, mode);
         } else if (zf.defaultValue() == null and @typeInfo(zf.type) != .optional) {
             ctx.issue(.{ .path = .field(sf.name), .code = .required, .message = "missing required field" });
         }
@@ -110,20 +114,62 @@ fn checkFieldNode(
     v: core.Value,
     ctx: *core.ValidateContext,
     comptime parent: core.TypeOptions,
+    mode: coercion.CoercionMode,
 ) void {
     switch (@typeInfo(FT)) {
         .optional => |o| {
             if (v == .null) return;
-            checkFieldNode(o.child, sf, v, ctx, parent);
+            checkFieldNode(o.child, sf, v, ctx, parent, mode);
         },
-        .bool => if (v != .bool) invalidType(sf, ctx, "expected bool"),
+        // serval-4tr: coercible values pass shape and run constraints on
+        // the coerced result. Aggressive scalar→string is shape-accepted
+        // without string constraints (no allocator in this walker).
+        .bool => switch (v) {
+            .bool => {},
+            .string => |s| {
+                if (mode == .none or coercion.boolFromString(s) == null)
+                    invalidType(sf, ctx, "expected bool");
+            },
+            .int => |n| {
+                if (mode != .aggressive or coercion.boolFromInt(n) == null)
+                    invalidType(sf, ctx, "expected bool");
+            },
+            else => invalidType(sf, ctx, "expected bool"),
+        },
         .int => switch (v) {
             .int => |n| checkScalar(sf, n, ctx),
+            .string => |s| {
+                if (mode != .none) {
+                    if (coercion.intFromString(FT, s)) |n| {
+                        checkScalar(sf, n, ctx);
+                        return;
+                    }
+                }
+                invalidType(sf, ctx, "expected integer");
+            },
+            .float => |fl| {
+                if (mode == .aggressive) {
+                    if (coercion.intFromFloat(FT, fl)) |n| {
+                        checkScalar(sf, n, ctx);
+                        return;
+                    }
+                }
+                invalidType(sf, ctx, "expected integer");
+            },
             else => invalidType(sf, ctx, "expected integer"),
         },
         .float => switch (v) {
             .float => |fl| checkScalarFloat(sf, fl, ctx),
             .int => |n| checkScalarFloat(sf, @as(f64, @floatFromInt(n)), ctx),
+            .string => |s| {
+                if (mode != .none) {
+                    if (coercion.floatFromString(f64, s)) |fl| {
+                        checkScalarFloat(sf, fl, ctx);
+                        return;
+                    }
+                }
+                invalidType(sf, ctx, "expected number");
+            },
             else => invalidType(sf, ctx, "expected number"),
         },
         .@"enum" => switch (parent.enum_tagging) {
@@ -174,12 +220,12 @@ fn checkFieldNode(
                         .name = sf.name,
                         .wire_name = sf.wire_name,
                     };
-                    for (items) |item| checkFieldNode(p.child, element_field, item, ctx, parent);
+                    for (items) |item| checkFieldNode(p.child, element_field, item, ctx, parent, mode);
                 },
                 else => invalidType(sf, ctx, "expected array"),
             }
         },
-        .@"struct" => checkStructNode(FT, v, ctx),
+        .@"struct" => checkStructNode(FT, v, ctx, mode),
         // TODO(serval): deep union shape checks per tagging mode.
         .@"union" => {},
         else => {},

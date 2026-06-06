@@ -234,6 +234,33 @@ test "msgpack streaming entry points" {
     try std.testing.expectEqual(encoded.len, serval.msgpack.measureEncodedLen(P, .{ .x = 1 }, .{}));
 }
 
+// serval-4tr
+test "msgpack coercion: safe and aggressive" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const Wire = struct { age: []const u8, score: f64, label: i64 };
+    const Target = struct { age: u8 = 0, score: f64 = 0, label: []const u8 = "" };
+    const encoded = try serval.msgpack.encodeAlloc(Wire, a, .{ .age = "42", .score = 2.5, .label = 7 }, .{});
+
+    try std.testing.expectError(error.UnexpectedToken, serval.msgpack.decode(Target, a, encoded, .{}));
+
+    // safe: string → int works, int → string doesn't
+    try std.testing.expectError(error.UnexpectedToken, serval.msgpack.decode(Target, a, encoded, .{ .coercion = .safe }));
+
+    const v = try serval.msgpack.decode(Target, a, encoded, .{ .coercion = .aggressive });
+    try std.testing.expectEqual(@as(u8, 42), v.age);
+    try std.testing.expectEqualStrings("7", v.label);
+
+    // aggressive float → int truncation
+    const F = struct { n: f64 };
+    const I = struct { n: i32 };
+    const fenc = try serval.msgpack.encodeAlloc(F, a, .{ .n = -41.9 }, .{});
+    const i = try serval.msgpack.decode(I, a, fenc, .{ .coercion = .aggressive });
+    try std.testing.expectEqual(@as(i32, -41), i.n);
+}
+
 test "msgpack truncated input is decode error" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

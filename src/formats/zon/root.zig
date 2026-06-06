@@ -7,6 +7,7 @@
 //!   decode errors, not path-aware report issues
 //! - no presence tracking (ctx.has() is always false)
 //! - no borrowed mode (std.zon requires a sentinel-terminated copy)
+//! - DecodeOptions.coercion is ignored (std.zon owns the parsing)
 //! Constraint validation integrates exactly like serval-json.
 
 pub const zon = @import("zon.zig");

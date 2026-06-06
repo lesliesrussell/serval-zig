@@ -39,6 +39,15 @@ expected/actual values. `report.ok()` is true iff there are no issues.
 
 ## Coercion modes
 
+Set via `DecodeOptions.coercion` (JSON/MessagePack decode and buffered
+union payloads) and `CheckOptions.coercion` (`valueAgainstSchema`); ZON
+ignores it (std.zon owns the parsing). Typed `check()` ignores it too —
+coercion is a decode-time concern.
+
 - `none` — exact type matches only (default)
-- `safe` — lossless conversions
-- `aggressive` — lossy conversions allowed
+- `safe` — lossless: numeric string → int (exact parse), string → float,
+  exact `"true"`/`"false"` → bool
+- `aggressive` — adds lossy: float → int (truncated toward zero,
+  out-of-range is `Overflow`), int 0/1 ↔ bool, scalar → string
+
+Constraints always run against the coerced value.

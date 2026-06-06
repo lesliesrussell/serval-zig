@@ -272,6 +272,34 @@ fn skipValue(d: *Decoder) core.DecodeError!void {
     }
 }
 
+// serval-4tr
+/// String-typed field value: a str/bin item, or under aggressive coercion
+/// a formatted scalar.
+fn stringValue(d: *Decoder) core.DecodeError![]const u8 {
+    switch (try readHeader(d)) {
+        .str, .bin => |n| {
+            const s = try d.readSlice(n);
+            return if (d.options.memory == .owned)
+                d.allocator.dupe(u8, s) catch error.OutOfMemory
+            else
+                s;
+        },
+        .int => |n| {
+            if (d.options.coercion != .aggressive) return error.UnexpectedToken;
+            return std.fmt.allocPrint(d.allocator, "{d}", .{n}) catch error.OutOfMemory;
+        },
+        .float => |f| {
+            if (d.options.coercion != .aggressive) return error.UnexpectedToken;
+            return std.fmt.allocPrint(d.allocator, "{d}", .{f}) catch error.OutOfMemory;
+        },
+        .bool => |b| {
+            if (d.options.coercion != .aggressive) return error.UnexpectedToken;
+            return if (b) "true" else "false";
+        },
+        else => return error.UnexpectedToken,
+    }
+}
+
 fn readStr(d: *Decoder, dupe_for_owned: bool) core.DecodeError![]const u8 {
     const n = switch (try readHeader(d)) {
         .str, .bin => |n| n,
@@ -290,18 +318,47 @@ fn decodeAny(
     comptime parent: core.TypeOptions,
 ) core.DecodeError!T {
     switch (@typeInfo(T)) {
-        .bool => return switch (try readHeader(d)) {
-            .bool => |b| b,
-            else => error.UnexpectedToken,
+        // serval-4tr: scalar branches accept coerced inputs per
+        // DecodeOptions.coercion (see validate/coercion.zig for the matrix).
+        .bool => switch (try readHeader(d)) {
+            .bool => |b| return b,
+            .str => |n| {
+                const s = try d.readSlice(n);
+                if (d.options.coercion == .none) return error.UnexpectedToken;
+                return validate.coercion.boolFromString(s) orelse error.UnexpectedToken;
+            },
+            .int => |n| {
+                if (d.options.coercion != .aggressive) return error.UnexpectedToken;
+                return validate.coercion.boolFromInt(n) orelse error.UnexpectedToken;
+            },
+            else => return error.UnexpectedToken,
         },
-        .int => return switch (try readHeader(d)) {
-            .int => |n| std.math.cast(T, n) orelse error.Overflow,
-            else => error.UnexpectedToken,
+        .int => switch (try readHeader(d)) {
+            .int => |n| return std.math.cast(T, n) orelse error.Overflow,
+            .str => |n| {
+                const s = try d.readSlice(n);
+                if (d.options.coercion == .none) return error.UnexpectedToken;
+                return validate.coercion.intFromString(T, s) orelse error.UnexpectedToken;
+            },
+            .float => |f| {
+                if (d.options.coercion != .aggressive) return error.UnexpectedToken;
+                return validate.coercion.intFromFloat(T, f) orelse error.Overflow;
+            },
+            .bool => |b| {
+                if (d.options.coercion != .aggressive) return error.UnexpectedToken;
+                return @intFromBool(b);
+            },
+            else => return error.UnexpectedToken,
         },
-        .float => return switch (try readHeader(d)) {
-            .float => |f| @floatCast(f),
-            .int => |n| @floatFromInt(n),
-            else => error.UnexpectedToken,
+        .float => switch (try readHeader(d)) {
+            .float => |f| return @floatCast(f),
+            .int => |n| return @floatFromInt(n),
+            .str => |n| {
+                const s = try d.readSlice(n);
+                if (d.options.coercion == .none) return error.UnexpectedToken;
+                return validate.coercion.floatFromString(T, s) orelse error.UnexpectedToken;
+            },
+            else => return error.UnexpectedToken,
         },
         .optional => |o| {
             if (d.pos < d.buf.len and d.buf[d.pos] == 0xc0) {
@@ -324,7 +381,7 @@ fn decodeAny(
             if (p.size != .slice)
                 @compileError("serval-msgpack: unsupported pointer type " ++ @typeName(T));
             // str/bin accepted interchangeably for []u8 regardless of policy.
-            if (p.child == u8) return try readStr(d, true);
+            if (p.child == u8) return try stringValue(d);
             return try decodeSlice(p.child, d, parent);
         },
         .@"struct" => return decodeStruct(T, d, false),
@@ -552,7 +609,8 @@ fn decodeUnion(comptime T: type, d: *Decoder) core.DecodeError!T {
         // Buffered: the tag key can appear anywhere in the map.
         .internal, .untagged => {
             const buffered = try decodeValue(d);
-            return codec.fromValue(T, d.allocator, buffered);
+            // serval-4tr
+            return codec.decode.fromValueCoerce(T, d.allocator, buffered, d.options.coercion);
         },
     }
 }

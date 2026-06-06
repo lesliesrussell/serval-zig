@@ -4,6 +4,8 @@
 const std = @import("std");
 const core = @import("serval-core");
 const options = @import("options.zig");
+// serval-4tr
+const validate = @import("serval-validate");
 
 pub const DecodeOptions = options.DecodeOptions;
 
@@ -18,7 +20,18 @@ pub fn fromValue(
     allocator: std.mem.Allocator,
     v: core.Value,
 ) core.DecodeError!T {
-    return fromValueOpts(T, allocator, v, .{});
+    return fromValueOpts(T, allocator, v, .{}, .none);
+}
+
+// serval-4tr
+/// fromValue with a coercion mode (see validate.CoercionMode).
+pub fn fromValueCoerce(
+    comptime T: type,
+    allocator: std.mem.Allocator,
+    v: core.Value,
+    mode: validate.CoercionMode,
+) core.DecodeError!T {
+    return fromValueOpts(T, allocator, v, .{}, mode);
 }
 
 // serval-plc
@@ -27,24 +40,50 @@ pub fn fromValueOpts(
     allocator: std.mem.Allocator,
     v: core.Value,
     comptime parent: core.TypeOptions,
+    mode: validate.CoercionMode,
 ) core.DecodeError!T {
     switch (@typeInfo(T)) {
+        // serval-4tr: scalar branches accept coerced Values per mode.
         .bool => return switch (v) {
             .bool => |b| b,
+            .string => |s| if (mode != .none)
+                validate.coercion.boolFromString(s) orelse error.UnexpectedToken
+            else
+                error.UnexpectedToken,
+            .int => |n| if (mode == .aggressive)
+                validate.coercion.boolFromInt(n) orelse error.UnexpectedToken
+            else
+                error.UnexpectedToken,
             else => error.UnexpectedToken,
         },
         .int => return switch (v) {
             .int => |n| std.math.cast(T, n) orelse error.Overflow,
+            .string => |s| if (mode != .none)
+                validate.coercion.intFromString(T, s) orelse error.UnexpectedToken
+            else
+                error.UnexpectedToken,
+            .float => |f| if (mode == .aggressive)
+                validate.coercion.intFromFloat(T, f) orelse error.Overflow
+            else
+                error.UnexpectedToken,
+            .bool => |b| if (mode == .aggressive)
+                @intFromBool(b)
+            else
+                error.UnexpectedToken,
             else => error.UnexpectedToken,
         },
         .float => return switch (v) {
             .float => |f| @floatCast(f),
             .int => |n| @floatFromInt(n),
+            .string => |s| if (mode != .none)
+                validate.coercion.floatFromString(T, s) orelse error.UnexpectedToken
+            else
+                error.UnexpectedToken,
             else => error.UnexpectedToken,
         },
         .optional => |o| return switch (v) {
             .null => null,
-            else => try fromValueOpts(o.child, allocator, v, parent),
+            else => try fromValueOpts(o.child, allocator, v, parent, mode),
         },
         .@"enum" => switch (parent.enum_tagging) {
             .name => return switch (v) {
@@ -62,6 +101,19 @@ pub fn fromValueOpts(
             if (p.child == u8 and parent.bytes_policy == .string) {
                 return switch (v) {
                     .string, .bytes => |s| s,
+                    // serval-4tr
+                    .int => |n| if (mode == .aggressive)
+                        std.fmt.allocPrint(allocator, "{d}", .{n}) catch error.OutOfMemory
+                    else
+                        error.UnexpectedToken,
+                    .float => |f| if (mode == .aggressive)
+                        std.fmt.allocPrint(allocator, "{d}", .{f}) catch error.OutOfMemory
+                    else
+                        error.UnexpectedToken,
+                    .bool => |b| if (mode == .aggressive)
+                        @as([]const u8, if (b) "true" else "false")
+                    else
+                        error.UnexpectedToken,
                     else => error.UnexpectedToken,
                 };
             }
@@ -71,12 +123,12 @@ pub fn fromValueOpts(
             };
             const out = allocator.alloc(p.child, items.len) catch return error.OutOfMemory;
             for (items, out) |item, *slot| {
-                slot.* = try fromValueOpts(p.child, allocator, item, parent);
+                slot.* = try fromValueOpts(p.child, allocator, item, parent, mode);
             }
             return out;
         },
-        .@"struct" => return fromValueStruct(T, allocator, v),
-        .@"union" => return fromValueUnion(T, allocator, v),
+        .@"struct" => return fromValueStruct(T, allocator, v, mode),
+        .@"union" => return fromValueUnion(T, allocator, v, mode),
         else => @compileError("serval-codec: unsupported type " ++ @typeName(T)),
     }
 }
@@ -86,6 +138,7 @@ fn fromValueStruct(
     comptime T: type,
     allocator: std.mem.Allocator,
     v: core.Value,
+    mode: validate.CoercionMode,
 ) core.DecodeError!T {
     const obj = switch (v) {
         .object => |o| o,
@@ -102,7 +155,7 @@ fn fromValueStruct(
             break :blk null;
         };
         if (found) |fval| {
-            @field(result, zf.name) = try fromValueOpts(zf.type, allocator, fval, S.options);
+            @field(result, zf.name) = try fromValueOpts(zf.type, allocator, fval, S.options, mode);
         } else if (zf.defaultValue()) |default| {
             @field(result, zf.name) = default;
         } else if (@typeInfo(zf.type) == .optional) {
@@ -119,6 +172,7 @@ fn fromValueUnion(
     comptime T: type,
     allocator: std.mem.Allocator,
     v: core.Value,
+    mode: validate.CoercionMode,
 ) core.DecodeError!T {
     const info = @typeInfo(T).@"union";
     if (info.tag_type == null)
@@ -147,7 +201,7 @@ fn fromValueUnion(
                                 else => error.UnexpectedToken,
                             };
                         }
-                        return @unionInit(T, f.name, try fromValueOpts(f.type, allocator, obj[0].value, .{}));
+                        return @unionInit(T, f.name, try fromValueOpts(f.type, allocator, obj[0].value, .{}, mode));
                     }
                 }
                 return error.InvalidEnumTag;
@@ -176,7 +230,7 @@ fn fromValueUnion(
                     if (f.type == void) return @unionInit(T, f.name, {});
                     for (obj) |fv| {
                         if (std.mem.eql(u8, fv.name, opts.union_content_field)) {
-                            return @unionInit(T, f.name, try fromValueOpts(f.type, allocator, fv.value, .{}));
+                            return @unionInit(T, f.name, try fromValueOpts(f.type, allocator, fv.value, .{}, mode));
                         }
                     }
                     return error.UnexpectedToken;
@@ -208,7 +262,7 @@ fn fromValueUnion(
                         @compileError("serval-codec: internal union tagging requires struct or void payloads: " ++ @typeName(T));
                     // Whole object passed through: the tag key is ignored as
                     // an unknown by the lenient struct mapper.
-                    return @unionInit(T, f.name, try fromValueStruct(f.type, allocator, v));
+                    return @unionInit(T, f.name, try fromValueStruct(f.type, allocator, v, mode));
                 }
             }
             return error.InvalidEnumTag;
@@ -220,7 +274,7 @@ fn fromValueUnion(
                 if (f.type == void) {
                     if (v == .null) return @unionInit(T, f.name, {});
                 } else {
-                    const attempt: ?f.type = fromValueOpts(f.type, allocator, v, .{}) catch |err| switch (err) {
+                    const attempt: ?f.type = fromValueOpts(f.type, allocator, v, .{}, mode) catch |err| switch (err) {
                         error.OutOfMemory => return error.OutOfMemory,
                         else => null,
                     };

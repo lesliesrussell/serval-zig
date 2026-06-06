@@ -774,6 +774,103 @@ test "schema-driven flow: decodeValue then valueAgainstSchema" {
     try std.testing.expectEqual(serval.core.IssueCode.min_len, report.issues[0].code);
 }
 
+// serval-4tr
+const Coercible = struct {
+    age: u8 = 0,
+    score: f64 = 0,
+    active: bool = false,
+    label: []const u8 = "",
+};
+
+test "coercion none: type mismatches are errors" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    try std.testing.expectError(error.UnexpectedToken, serval.json.decode(Coercible, arena.allocator(),
+        \\{"age":"42"}
+    , .{}));
+}
+
+test "coercion safe: lossless conversions accepted" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const v = try serval.json.decode(Coercible, arena.allocator(),
+        \\{"age":"42","score":"2.5","active":"true"}
+    , .{ .coercion = .safe });
+    try std.testing.expectEqual(@as(u8, 42), v.age);
+    try std.testing.expectEqual(@as(f64, 2.5), v.score);
+    try std.testing.expect(v.active);
+}
+
+test "coercion safe: lossy conversions still rejected" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // float → int
+    try std.testing.expectError(error.UnexpectedToken, serval.json.decode(Coercible, a,
+        \\{"age":1.5}
+    , .{ .coercion = .safe }));
+    // junk string → int
+    try std.testing.expectError(error.UnexpectedToken, serval.json.decode(Coercible, a,
+        \\{"age":"4x"}
+    , .{ .coercion = .safe }));
+    // number → string
+    try std.testing.expectError(error.UnexpectedToken, serval.json.decode(Coercible, a,
+        \\{"label":42}
+    , .{ .coercion = .safe }));
+}
+
+test "coercion aggressive: lossy conversions with defined semantics" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const v = try serval.json.decode(Coercible, a,
+        \\{"age":41.9,"active":1,"label":42}
+    , .{ .coercion = .aggressive });
+    try std.testing.expectEqual(@as(u8, 41), v.age); // trunc toward zero
+    try std.testing.expect(v.active); // 1 → true
+    try std.testing.expectEqualStrings("42", v.label); // number token text
+
+    const w = try serval.json.decode(Coercible, a,
+        \\{"label":true}
+    , .{ .coercion = .aggressive });
+    try std.testing.expectEqualStrings("true", w.label);
+
+    // bool → int
+    const B = struct { n: u8 };
+    const b = try serval.json.decode(B, a,
+        \\{"n":true}
+    , .{ .coercion = .aggressive });
+    try std.testing.expectEqual(@as(u8, 1), b.n);
+
+    // out-of-range float → int is Overflow, not wraparound
+    try std.testing.expectError(error.Overflow, serval.json.decode(Coercible, a,
+        \\{"age":300.5}
+    , .{ .coercion = .aggressive }));
+    // int 2 → bool is not a thing
+    try std.testing.expectError(error.UnexpectedToken, serval.json.decode(Coercible, a,
+        \\{"active":2}
+    , .{ .coercion = .aggressive }));
+}
+
+test "coercion flows into buffered union payloads" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const Shape2 = union(enum) {
+        circle: struct { r: f64 },
+
+        pub const serval = .{ .union_tagging = .internal, .union_tag_field = "kind" };
+    };
+    const s = try serval.json.decode(Shape2, arena.allocator(),
+        \\{"kind":"circle","r":"2.5"}
+    , .{ .coercion = .safe });
+    try std.testing.expectEqual(@as(f64, 2.5), s.circle.r);
+}
+
 test "json roundtrip" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

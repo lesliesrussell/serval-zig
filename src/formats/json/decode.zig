@@ -252,21 +252,61 @@ fn decodeAny(
     comptime parent: core.TypeOptions,
 ) core.DecodeError!T {
     switch (@typeInfo(T)) {
-        .bool => return switch (try nextToken(d)) {
-            .true => true,
-            .false => false,
-            else => error.UnexpectedToken,
+        // serval-4tr: scalar branches accept coerced inputs per
+        // DecodeOptions.coercion (see validate/coercion.zig for the matrix).
+        .bool => {
+            const tok = try nextToken(d);
+            switch (tok) {
+                .true => return true,
+                .false => return false,
+                .string, .allocated_string => |s| {
+                    if (d.options.coercion == .none) return error.UnexpectedToken;
+                    return validate.coercion.boolFromString(s) orelse error.UnexpectedToken;
+                },
+                .number, .allocated_number => |s| {
+                    if (d.options.coercion != .aggressive) return error.UnexpectedToken;
+                    const n = std.fmt.parseInt(i128, s, 10) catch return error.UnexpectedToken;
+                    return validate.coercion.boolFromInt(n) orelse error.UnexpectedToken;
+                },
+                else => return error.UnexpectedToken,
+            }
         },
         .int => {
-            const s = try numberSlice(d);
-            return std.fmt.parseInt(T, s, 10) catch |e| switch (e) {
-                error.Overflow => error.Overflow,
-                error.InvalidCharacter => error.InvalidSyntax,
-            };
+            const tok = try nextToken(d);
+            switch (tok) {
+                .number, .allocated_number => |s| {
+                    if (std.fmt.parseInt(T, s, 10)) |n| return n else |e| switch (e) {
+                        error.Overflow => return error.Overflow,
+                        error.InvalidCharacter => {
+                            // non-integer number: a type mismatch unless
+                            // aggressive truncation is on
+                            if (d.options.coercion != .aggressive) return error.UnexpectedToken;
+                            const f = std.fmt.parseFloat(f64, s) catch return error.InvalidSyntax;
+                            return validate.coercion.intFromFloat(T, f) orelse error.Overflow;
+                        },
+                    }
+                },
+                .string, .allocated_string => |s| {
+                    if (d.options.coercion == .none) return error.UnexpectedToken;
+                    return validate.coercion.intFromString(T, s) orelse error.UnexpectedToken;
+                },
+                .true, .false => {
+                    if (d.options.coercion != .aggressive) return error.UnexpectedToken;
+                    return if (tok == .true) 1 else 0;
+                },
+                else => return error.UnexpectedToken,
+            }
         },
         .float => {
-            const s = try numberSlice(d);
-            return std.fmt.parseFloat(T, s) catch error.InvalidSyntax;
+            const tok = try nextToken(d);
+            switch (tok) {
+                .number, .allocated_number => |s| return std.fmt.parseFloat(T, s) catch error.InvalidSyntax,
+                .string, .allocated_string => |s| {
+                    if (d.options.coercion == .none) return error.UnexpectedToken;
+                    return validate.coercion.floatFromString(T, s) orelse error.UnexpectedToken;
+                },
+                else => return error.UnexpectedToken,
+            }
         },
         .optional => |o| {
             if (try peek(d) == .null) {
@@ -291,7 +331,7 @@ fn decodeAny(
             if (p.size != .slice)
                 @compileError("serval-json: unsupported pointer type " ++ @typeName(T));
             if (p.child == u8 and parent.bytes_policy == .string)
-                return try stringSlice(d, true);
+                return try stringValue(d);
             return try decodeSlice(p.child, d, parent);
         },
         .@"struct" => return decodeStruct(T, d, false),
@@ -315,7 +355,8 @@ fn decodeUnion(comptime T: type, d: anytype) core.DecodeError!T {
         // garbage after mapping).
         .internal, .untagged => blk: {
             const buffered = try decodeValue(d);
-            break :blk codec.fromValue(T, d.allocator, buffered);
+            // serval-4tr
+            break :blk codec.decode.fromValueCoerce(T, d.allocator, buffered, d.options.coercion);
         },
     };
 }
@@ -580,6 +621,36 @@ fn numberSlice(d: anytype) core.DecodeError![]const u8 {
         .number, .allocated_number => |s| s,
         else => error.UnexpectedToken,
     };
+}
+
+// serval-4tr
+/// String-typed field value: a string token, or under aggressive coercion
+/// a number's token text or a bool literal.
+fn stringValue(d: anytype) core.DecodeError![]const u8 {
+    const tok = try nextToken(d);
+    switch (tok) {
+        .string => |s| return if (d.options.memory == .owned)
+            d.allocator.dupe(u8, s) catch error.OutOfMemory
+        else
+            s,
+        .allocated_string => |s| return s,
+        .number => |s| {
+            if (d.options.coercion != .aggressive) return error.UnexpectedToken;
+            return if (d.options.memory == .owned)
+                d.allocator.dupe(u8, s) catch error.OutOfMemory
+            else
+                s;
+        },
+        .allocated_number => |s| {
+            if (d.options.coercion != .aggressive) return error.UnexpectedToken;
+            return s;
+        },
+        .true, .false => {
+            if (d.options.coercion != .aggressive) return error.UnexpectedToken;
+            return if (tok == .true) "true" else "false";
+        },
+        else => return error.UnexpectedToken,
+    }
 }
 
 /// `dupe_for_owned`: with MemoryMode.owned, unescaped string tokens (which
