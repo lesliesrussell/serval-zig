@@ -124,6 +124,22 @@ test "decodeResult: invalid on constraint violation" {
     try std.testing.expectEqualStrings("name", dr.invalid.issues[0].path.segments[0].field);
 }
 
+// serval-sru
+test "decodeResult: nested missing required field carries full path" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const Outer = struct { inner: struct { x: i32 } };
+    const dr = try serval.json.decodeResult(Outer, arena.allocator(),
+        \\{"inner":{}}
+    , .{});
+    const segs = dr.invalid.issues[0].path.segments;
+    try std.testing.expectEqual(serval.core.IssueCode.required, dr.invalid.issues[0].code);
+    try std.testing.expectEqual(@as(usize, 2), segs.len);
+    try std.testing.expectEqualStrings("inner", segs[0].field);
+    try std.testing.expectEqualStrings("x", segs[1].field);
+}
+
 test "decodeResult: missing required field is a shape issue" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

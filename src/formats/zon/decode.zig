@@ -21,12 +21,12 @@ pub fn decode(
     const result = try decodeResult(T, allocator, input, options);
     switch (result) {
         .ok => |ok| {
-            allocator.free(ok.warnings.issues);
+            ok.warnings.deinit(allocator);
             allocator.free(ok.unknown);
             return ok.value;
         },
         .invalid => |report| {
-            defer allocator.free(report.issues);
+            defer report.deinit(allocator);
             return error.ValidationFailed;
         },
         .decode_error => |e| return e,
@@ -77,7 +77,7 @@ pub fn decodeResult(
             }
             return .{ .invalid = report };
         }
-        allocator.free(report.issues);
+        report.deinit(allocator);
     }
 
     return .{ .ok = .{ .value = value } };

@@ -37,16 +37,22 @@ pub fn check(
     // serval-r4h
     ctx.present_fields = options.present_fields;
 
-    const S = core.schemaOf(T);
-    inline for (S.fields) |f| {
-        checkValue(f, @field(value.*, f.name), &ctx);
-    }
-    if (@hasDecl(T, "servalValidate")) {
-        T.servalValidate(&ctx, value);
-    }
+    checkStructValue(T, value, &ctx);
 
     const issues = try ctx.issues.toOwnedSlice(ctx.allocator);
+    ctx.path_stack.deinit(ctx.allocator);
     return .{ .issues = issues };
+}
+
+// serval-sru
+fn checkStructValue(comptime T: type, value: *const T, ctx: *core.ValidateContext) void {
+    const S = core.schemaOf(T);
+    inline for (S.fields) |f| {
+        checkValue(f, @field(value.*, f.name), ctx);
+    }
+    if (@hasDecl(T, "servalValidate")) {
+        T.servalValidate(ctx, value);
+    }
 }
 
 // serval-l3p
@@ -70,6 +76,7 @@ pub fn valueAgainstSchema(
         checkFieldNode(T, .{ .name = "value", .wire_name = "value" }, value, &ctx, .{}, options.coercion);
     }
     const issues = try ctx.issues.toOwnedSlice(ctx.allocator);
+    ctx.path_stack.deinit(ctx.allocator);
     return .{ .issues = issues };
 }
 
@@ -219,19 +226,36 @@ fn checkFieldNode(
                         .code = .max_items,
                         .message = "more items than max_items",
                     });
-                    // Elements: shape only — field constraints don't apply
-                    // to individual elements. (.unique is skipped on the
-                    // dynamic path: Value equality semantics are undefined.)
-                    const element_field = comptime core.Field{
-                        .name = sf.name,
-                        .wire_name = sf.wire_name,
-                    };
-                    for (items) |item| checkFieldNode(p.child, element_field, item, ctx, parent, mode);
+                    // serval-sru: struct elements recurse with index
+                    // segments; other elements are shape-checked only —
+                    // field constraints don't apply to individual elements.
+                    // (.unique is skipped on the dynamic path: Value
+                    // equality semantics are undefined.)
+                    if (comptime @typeInfo(p.child) == .@"struct") {
+                        ctx.pushPath(.{ .field = sf.name });
+                        defer ctx.popPath();
+                        for (items, 0..) |item, i| {
+                            ctx.pushPath(.{ .index = i });
+                            defer ctx.popPath();
+                            checkStructNode(p.child, item, ctx, mode);
+                        }
+                    } else {
+                        const element_field = comptime core.Field{
+                            .name = sf.name,
+                            .wire_name = sf.wire_name,
+                        };
+                        for (items) |item| checkFieldNode(p.child, element_field, item, ctx, parent, mode);
+                    }
                 },
                 else => invalidType(sf, ctx, "expected array"),
             }
         },
-        .@"struct" => checkStructNode(FT, v, ctx, mode),
+        // serval-sru
+        .@"struct" => {
+            ctx.pushPath(.{ .field = sf.name });
+            defer ctx.popPath();
+            checkStructNode(FT, v, ctx, mode);
+        },
         // TODO(serval): deep union shape checks per tagging mode.
         .@"union" => {},
         else => {},
@@ -253,10 +277,29 @@ fn checkValue(comptime f: core.Field, v: anytype, ctx: *core.ValidateContext) vo
         .float => checkScalarFloat(f, v, ctx),
         .pointer => |p| {
             if (p.size != .slice) return;
-            if (p.child == u8)
-                checkString(f, v, ctx)
-            else
+            if (p.child == u8) {
+                checkString(f, v, ctx);
+            } else {
                 checkCollection(f, v, ctx);
+                // serval-sru: struct elements get their own constraints
+                // checked, with index segments in the path.
+                if (comptime @typeInfo(p.child) == .@"struct") {
+                    ctx.pushPath(.{ .field = f.name });
+                    defer ctx.popPath();
+                    for (v, 0..) |item, i| {
+                        ctx.pushPath(.{ .index = i });
+                        defer ctx.popPath();
+                        checkStructValue(p.child, &item, ctx);
+                    }
+                }
+            }
+        },
+        // serval-sru: typed check now recurses into nested structs (their
+        // constraints were previously skipped silently).
+        .@"struct" => {
+            ctx.pushPath(.{ .field = f.name });
+            defer ctx.popPath();
+            checkStructValue(V, &v, ctx);
         },
         else => {},
     }

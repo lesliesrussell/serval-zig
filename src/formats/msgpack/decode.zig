@@ -128,7 +128,7 @@ pub fn decodeResult(
             allocator.free(unknown);
             return .{ .invalid = report };
         }
-        allocator.free(report.issues);
+        report.deinit(allocator);
     }
 
     return .{ .ok = .{ .value = value, .unknown = unknown } };
@@ -141,12 +141,12 @@ fn unwrapResult(
 ) Error!T {
     switch (result) {
         .ok => |ok| {
-            allocator.free(ok.warnings.issues);
+            ok.warnings.deinit(allocator);
             allocator.free(ok.unknown);
             return ok.value;
         },
         .invalid => |report| {
-            defer allocator.free(report.issues);
+            defer report.deinit(allocator);
             for (report.issues) |i| {
                 if (i.code == .unknown_field) return error.UnknownField;
             }
@@ -428,7 +428,12 @@ fn decodeStruct(comptime T: type, d: *Decoder, comptime is_top: bool) core.Decod
         };
         inline for (S.fields, struct_fields, 0..) |sf, zf, i| {
             if (std.mem.eql(u8, key, sf.wire_name)) {
+                // serval-sru: nested shape issues get full paths; gated so
+                // flat decodes stay allocation-free.
+                const descends = comptime core.type_info.containsStruct(zf.type);
+                if (descends) d.ctx.pushPath(.{ .field = zf.name });
                 @field(result, zf.name) = try decodeAny(zf.type, d, S.options);
+                if (descends) d.ctx.popPath();
                 // serval-au2
                 try validate.coercion.applyStringTransforms(sf.meta, zf.type, &@field(result, zf.name), d.allocator);
                 seen[i] = true;

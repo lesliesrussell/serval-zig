@@ -3,6 +3,7 @@
 //! Validation is never just `error.Invalid` — every issue carries a path,
 //! a code, and a message.
 
+const std = @import("std");
 const value_mod = @import("value.zig");
 
 pub const PathSegment = union(enum) {
@@ -22,6 +23,20 @@ pub const Path = struct {
     }
 
     pub const root: Path = .{};
+
+    // serval-sru
+    /// Renders `.field[3].nested` style; "(root)" when empty. `{f}`-able.
+    pub fn format(self: Path, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        if (self.segments.len == 0) return writer.writeAll("(root)");
+        for (self.segments) |seg| switch (seg) {
+            .field, .variant => |n| {
+                try writer.writeByte('.');
+                try writer.writeAll(n);
+            },
+            .index => |i| try writer.print("[{d}]", .{i}),
+            .key => |k| try writer.print("[\"{s}\"]", .{k}),
+        };
+    }
 };
 
 pub const IssueCode = enum {
@@ -59,6 +74,14 @@ pub const ValidationReport = struct {
 
     pub fn ok(self: ValidationReport) bool {
         return self.issues.len == 0;
+    }
+
+    // serval-sru
+    /// Issue paths are runtime-built and allocator-owned — free reports
+    /// with this (or decode/validate with an arena).
+    pub fn deinit(self: ValidationReport, allocator: std.mem.Allocator) void {
+        for (self.issues) |i| allocator.free(i.path.segments);
+        allocator.free(self.issues);
     }
 };
 

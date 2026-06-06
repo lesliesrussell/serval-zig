@@ -11,7 +11,7 @@ fn checkAlloc(comptime T: type, value: *const T) !serval.core.ValidationReport {
 test "check on valid value returns ok report" {
     const user = User{ .id = 1, .name = "ada" };
     const report = try checkAlloc(User, &user);
-    defer std.testing.allocator.free(report.issues);
+    defer report.deinit(std.testing.allocator);
     try std.testing.expect(report.ok());
 }
 
@@ -59,7 +59,7 @@ const Account = struct {
 test "scalar: min violation reported with path and code" {
     const acct = Account{ .name = "ada", .age = 9 };
     const report = try checkAlloc(Account, &acct);
-    defer std.testing.allocator.free(report.issues);
+    defer report.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 1), report.issues.len);
     try std.testing.expectEqual(serval.core.IssueCode.min, report.issues[0].code);
     try std.testing.expectEqualStrings("age", report.issues[0].path.segments[0].field);
@@ -71,18 +71,18 @@ test "scalar: gt/lt bounds" {
     const low = Account{ .name = "ada", .score = 0 };
     var report = try checkAlloc(Account, &low);
     try std.testing.expectEqual(serval.core.IssueCode.gt, report.issues[0].code);
-    std.testing.allocator.free(report.issues);
+    report.deinit(std.testing.allocator);
 
     const high = Account{ .name = "ada", .score = 100 };
     report = try checkAlloc(Account, &high);
-    defer std.testing.allocator.free(report.issues);
+    defer report.deinit(std.testing.allocator);
     try std.testing.expectEqual(serval.core.IssueCode.lt, report.issues[0].code);
 }
 
 test "scalar: optional null skips constraints" {
     const acct = Account{ .name = "ada", .age = null };
     const report = try checkAlloc(Account, &acct);
-    defer std.testing.allocator.free(report.issues);
+    defer report.deinit(std.testing.allocator);
     try std.testing.expect(report.ok());
 }
 
@@ -90,18 +90,18 @@ test "string: min_len and max_len" {
     const short = Account{ .name = "a" };
     var report = try checkAlloc(Account, &short);
     try std.testing.expectEqual(serval.core.IssueCode.min_len, report.issues[0].code);
-    std.testing.allocator.free(report.issues);
+    report.deinit(std.testing.allocator);
 
     const long = Account{ .name = "verylongname" };
     report = try checkAlloc(Account, &long);
-    defer std.testing.allocator.free(report.issues);
+    defer report.deinit(std.testing.allocator);
     try std.testing.expectEqual(serval.core.IssueCode.max_len, report.issues[0].code);
 }
 
 test "string: email rule" {
     const bad = Account{ .name = "ada", .email = "not-an-email" };
     const report = try checkAlloc(Account, &bad);
-    defer std.testing.allocator.free(report.issues);
+    defer report.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 1), report.issues.len);
     try std.testing.expectEqual(serval.core.IssueCode.email, report.issues[0].code);
 }
@@ -110,18 +110,18 @@ test "collection: max_items and unique" {
     const many = Account{ .name = "ada", .tags = &.{ 1, 2, 3, 4 } };
     var report = try checkAlloc(Account, &many);
     try std.testing.expectEqual(serval.core.IssueCode.max_items, report.issues[0].code);
-    std.testing.allocator.free(report.issues);
+    report.deinit(std.testing.allocator);
 
     const dup = Account{ .name = "ada", .tags = &.{ 1, 2, 1 } };
     report = try checkAlloc(Account, &dup);
-    defer std.testing.allocator.free(report.issues);
+    defer report.deinit(std.testing.allocator);
     try std.testing.expectEqual(serval.core.IssueCode.unique, report.issues[0].code);
 }
 
 test "multiple violations all reported" {
     const acct = Account{ .name = "a", .email = "nope", .age = 5 };
     const report = try checkAlloc(Account, &acct);
-    defer std.testing.allocator.free(report.issues);
+    defer report.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 3), report.issues.len);
 }
 
@@ -137,14 +137,14 @@ const Coded = struct {
 test "pattern: matching string passes" {
     const v = Coded{ .code = "ABC-123" };
     const report = try checkAlloc(Coded, &v);
-    defer std.testing.allocator.free(report.issues);
+    defer report.deinit(std.testing.allocator);
     try std.testing.expect(report.ok());
 }
 
 test "pattern: non-matching string reported" {
     const v = Coded{ .code = "abc" };
     const report = try checkAlloc(Coded, &v);
-    defer std.testing.allocator.free(report.issues);
+    defer report.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 1), report.issues.len);
     try std.testing.expectEqual(serval.core.IssueCode.pattern, report.issues[0].code);
     try std.testing.expectEqualStrings("code", report.issues[0].path.segments[0].field);
@@ -172,18 +172,18 @@ test "float: integral bounds applied" {
     try std.testing.expectEqual(@as(usize, 1), report.issues.len);
     try std.testing.expectEqual(serval.core.IssueCode.max, report.issues[0].code);
     try std.testing.expectEqual(@as(f64, 200), report.issues[0].actual.?.float);
-    std.testing.allocator.free(report.issues);
+    report.deinit(std.testing.allocator);
 
     const edge = Reading{ .temp = 20, .ratio = 1 };
     report = try checkAlloc(Reading, &edge);
-    defer std.testing.allocator.free(report.issues);
+    defer report.deinit(std.testing.allocator);
     try std.testing.expectEqual(serval.core.IssueCode.lt, report.issues[0].code);
 }
 
 test "float: in-range value passes" {
     const ok_val = Reading{ .temp = 21.5 };
     const report = try checkAlloc(Reading, &ok_val);
-    defer std.testing.allocator.free(report.issues);
+    defer report.deinit(std.testing.allocator);
     try std.testing.expect(report.ok());
 }
 
@@ -204,7 +204,7 @@ test "valueAgainstSchema: valid object passes" {
         pub const serval = .{ .fields = .{ .name = .{ .min_len = 2 }, .age = .{ .max = 120 } } };
     };
     const report = try serval.validate.valueAgainstSchema(Person, v, std.testing.allocator, .{});
-    defer std.testing.allocator.free(report.issues);
+    defer report.deinit(std.testing.allocator);
     try std.testing.expect(report.ok());
 }
 
@@ -223,14 +223,14 @@ test "valueAgainstSchema: type mismatch, missing, unknown, constraint" {
     }), std.testing.allocator, .{});
     try std.testing.expectEqual(serval.core.IssueCode.invalid_type, report.issues[0].code);
     try std.testing.expectEqualStrings("age", report.issues[0].path.segments[0].field);
-    std.testing.allocator.free(report.issues);
+    report.deinit(std.testing.allocator);
 
     // missing required age
     report = try serval.validate.valueAgainstSchema(Person, vObj(&.{
         .{ .name = "name", .value = .{ .string = "ada" } },
     }), std.testing.allocator, .{});
     try std.testing.expectEqual(serval.core.IssueCode.required, report.issues[0].code);
-    std.testing.allocator.free(report.issues);
+    report.deinit(std.testing.allocator);
 
     // unknown field
     report = try serval.validate.valueAgainstSchema(Person, vObj(&.{
@@ -239,14 +239,14 @@ test "valueAgainstSchema: type mismatch, missing, unknown, constraint" {
         .{ .name = "shoe", .value = .{ .int = 44 } },
     }), std.testing.allocator, .{});
     try std.testing.expectEqual(serval.core.IssueCode.unknown_field, report.issues[0].code);
-    std.testing.allocator.free(report.issues);
+    report.deinit(std.testing.allocator);
 
     // constraint violation through the dynamic path
     report = try serval.validate.valueAgainstSchema(Person, vObj(&.{
         .{ .name = "name", .value = .{ .string = "a" } },
         .{ .name = "age", .value = .{ .int = 30 } },
     }), std.testing.allocator, .{});
-    defer std.testing.allocator.free(report.issues);
+    defer report.deinit(std.testing.allocator);
     try std.testing.expectEqual(serval.core.IssueCode.min_len, report.issues[0].code);
 }
 
@@ -271,7 +271,7 @@ test "valueAgainstSchema: nested, arrays, enums, wire names" {
         .{ .name = "userId", .value = .{ .int = 9 } },
     }), std.testing.allocator, .{});
     try std.testing.expect(report.ok());
-    std.testing.allocator.free(report.issues);
+    report.deinit(std.testing.allocator);
 
     // bad enum tag + too many items + nested type error
     report = try serval.validate.valueAgainstSchema(Doc, vObj(&.{
@@ -280,7 +280,7 @@ test "valueAgainstSchema: nested, arrays, enums, wire names" {
         .{ .name = "inner", .value = vObj(&.{.{ .name = "x", .value = .{ .bool = true } }}) },
         .{ .name = "userId", .value = .{ .int = 9 } },
     }), std.testing.allocator, .{});
-    defer std.testing.allocator.free(report.issues);
+    defer report.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 3), report.issues.len);
 }
 
@@ -298,18 +298,18 @@ test "valueAgainstSchema honors coercion mode" {
     // none: type mismatch
     var report = try serval.validate.valueAgainstSchema(Person, dyn, std.testing.allocator, .{});
     try std.testing.expectEqual(serval.core.IssueCode.invalid_type, report.issues[0].code);
-    std.testing.allocator.free(report.issues);
+    report.deinit(std.testing.allocator);
 
     // safe: coerces, then constraints run on the coerced value
     report = try serval.validate.valueAgainstSchema(Person, dyn, std.testing.allocator, .{ .coercion = .safe });
     try std.testing.expect(report.ok());
-    std.testing.allocator.free(report.issues);
+    report.deinit(std.testing.allocator);
 
     // safe + constraint violation on coerced value
     report = try serval.validate.valueAgainstSchema(Person, vObj(&.{
         .{ .name = "age", .value = .{ .string = "9" } },
     }), std.testing.allocator, .{ .coercion = .safe });
-    defer std.testing.allocator.free(report.issues);
+    defer report.deinit(std.testing.allocator);
     try std.testing.expectEqual(serval.core.IssueCode.min, report.issues[0].code);
 }
 
@@ -332,18 +332,18 @@ test "one_of: scalar and string membership" {
     const ok_plan = Plan{ .tier = 2, .region = "eu" };
     var report = try checkAlloc(Plan, &ok_plan);
     try std.testing.expect(report.ok());
-    std.testing.allocator.free(report.issues);
+    report.deinit(std.testing.allocator);
 
     const bad_tier = Plan{ .tier = 5 };
     report = try checkAlloc(Plan, &bad_tier);
     try std.testing.expectEqual(@as(usize, 1), report.issues.len);
     try std.testing.expectEqual(serval.core.IssueCode.one_of, report.issues[0].code);
     try std.testing.expectEqualStrings("tier", report.issues[0].path.segments[0].field);
-    std.testing.allocator.free(report.issues);
+    report.deinit(std.testing.allocator);
 
     const bad_region = Plan{ .region = "jp" };
     report = try checkAlloc(Plan, &bad_region);
-    defer std.testing.allocator.free(report.issues);
+    defer report.deinit(std.testing.allocator);
     try std.testing.expectEqual(serval.core.IssueCode.one_of, report.issues[0].code);
 }
 
@@ -363,11 +363,11 @@ test "nonempty: strings and collections" {
     const empty_str = NonEmpty{ .name = "" };
     var report = try checkAlloc(NonEmpty, &empty_str);
     try std.testing.expectEqual(serval.core.IssueCode.nonempty, report.issues[0].code);
-    std.testing.allocator.free(report.issues);
+    report.deinit(std.testing.allocator);
 
     const empty_items = NonEmpty{ .items = &.{} };
     report = try checkAlloc(NonEmpty, &empty_items);
-    defer std.testing.allocator.free(report.issues);
+    defer report.deinit(std.testing.allocator);
     try std.testing.expectEqual(serval.core.IssueCode.nonempty, report.issues[0].code);
 }
 
@@ -378,15 +378,72 @@ test "one_of and nonempty on the dynamic path" {
         .{ .name = "tags", .value = .{ .array = &.{.{ .int = 1 }} } },
     }), std.testing.allocator, .{});
     try std.testing.expectEqual(serval.core.IssueCode.one_of, report.issues[0].code);
-    std.testing.allocator.free(report.issues);
+    report.deinit(std.testing.allocator);
 
     report = try serval.validate.valueAgainstSchema(Plan, vObj(&.{
         .{ .name = "tier", .value = .{ .int = 1 } },
         .{ .name = "region", .value = .{ .string = "us" } },
         .{ .name = "tags", .value = .{ .array = &.{} } },
     }), std.testing.allocator, .{});
-    defer std.testing.allocator.free(report.issues);
+    defer report.deinit(std.testing.allocator);
     try std.testing.expectEqual(serval.core.IssueCode.nonempty, report.issues[0].code);
+}
+
+// serval-sru
+const Address = struct {
+    zip: []const u8 = "12345",
+
+    pub const serval = .{ .fields = .{ .zip = .{ .min_len = 5 } } };
+};
+
+const Customer = struct {
+    name: []const u8 = "ok",
+    home: Address = .{},
+    addresses: []const Address = &.{},
+};
+
+test "nested paths: typed check recurses into nested structs" {
+    const c = Customer{ .home = .{ .zip = "1" } };
+    const report = try checkAlloc(Customer, &c);
+    defer report.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), report.issues.len);
+    const segs = report.issues[0].path.segments;
+    try std.testing.expectEqual(@as(usize, 2), segs.len);
+    try std.testing.expectEqualStrings("home", segs[0].field);
+    try std.testing.expectEqualStrings("zip", segs[1].field);
+}
+
+test "nested paths: slice-of-struct elements carry index segments" {
+    const c = Customer{ .addresses = &.{ .{}, .{ .zip = "9" } } };
+    const report = try checkAlloc(Customer, &c);
+    defer report.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), report.issues.len);
+    const segs = report.issues[0].path.segments;
+    try std.testing.expectEqual(@as(usize, 3), segs.len);
+    try std.testing.expectEqualStrings("addresses", segs[0].field);
+    try std.testing.expectEqual(@as(usize, 1), segs[1].index);
+    try std.testing.expectEqualStrings("zip", segs[2].field);
+}
+
+test "nested paths: path formats to dotted string" {
+    const c = Customer{ .addresses = &.{.{ .zip = "9" }} };
+    const report = try checkAlloc(Customer, &c);
+    defer report.deinit(std.testing.allocator);
+    const rendered = try std.fmt.allocPrint(std.testing.allocator, "{f}", .{report.issues[0].path});
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expectEqualStrings(".addresses[0].zip", rendered);
+}
+
+test "nested paths: dynamic walker carries nested paths" {
+    const report = try serval.validate.valueAgainstSchema(Customer, vObj(&.{
+        .{ .name = "home", .value = vObj(&.{.{ .name = "zip", .value = .{ .string = "1" } }}) },
+    }), std.testing.allocator, .{});
+    defer report.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), report.issues.len);
+    const segs = report.issues[0].path.segments;
+    try std.testing.expectEqual(@as(usize, 2), segs.len);
+    try std.testing.expectEqualStrings("home", segs[0].field);
+    try std.testing.expectEqualStrings("zip", segs[1].field);
 }
 
 // serval-bfp
@@ -410,10 +467,10 @@ test "struct-level custom validator invoked" {
     var report = try checkAlloc(Minor, &kid);
     try std.testing.expectEqual(@as(usize, 1), report.issues.len);
     try std.testing.expectEqual(serval.core.IssueCode.required_when, report.issues[0].code);
-    std.testing.allocator.free(report.issues);
+    report.deinit(std.testing.allocator);
 
     const adult = Minor{ .age = 30 };
     report = try checkAlloc(Minor, &adult);
-    defer std.testing.allocator.free(report.issues);
+    defer report.deinit(std.testing.allocator);
     try std.testing.expect(report.ok());
 }

@@ -37,6 +37,12 @@ Every issue carries a `Path` (nested fields, array indices, map keys,
 tagged union branches), an `IssueCode`, a message, and optional
 expected/actual values. `report.ok()` is true iff there are no issues.
 
+Paths are runtime-built and nested: `.addresses[1].zip` style, rendered
+via `{f}` (`Path.format`). Issue paths are allocator-owned — free
+reports with `report.deinit(allocator)` (or run everything in an
+arena). Typed `check()` recurses into nested structs and
+slice-of-struct elements, including their `servalValidate` hooks.
+
 ## Coercion modes
 
 Set via `DecodeOptions.coercion` (JSON/MessagePack decode and buffered
