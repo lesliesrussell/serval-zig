@@ -33,6 +33,24 @@ pub fn decode(
     }
 }
 
+// serval-x09
+/// Streaming decode: slurps the reader (ZON parsing needs the full AST),
+/// then runs the normal pipeline.
+pub fn decodeFromReader(
+    comptime T: type,
+    allocator: std.mem.Allocator,
+    io_reader: *std.Io.Reader,
+    options: codec.DecodeOptions,
+) Error!T {
+    const input = io_reader.allocRemaining(allocator, .unlimited) catch |e| switch (e) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.ReadFailed => return error.ReadFailed,
+        error.StreamTooLong => unreachable, // .unlimited
+    };
+    defer allocator.free(input);
+    return decode(T, allocator, input, options);
+}
+
 pub fn decodeResult(
     comptime T: type,
     allocator: std.mem.Allocator,

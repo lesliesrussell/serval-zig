@@ -84,6 +84,24 @@ test "zon encode and roundtrip" {
     try std.testing.expectEqualDeep(cfg, back);
 }
 
+// serval-x09
+test "zon decodeFromReader and encodeToWriter" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var reader = std.Io.Reader.fixed(
+        \\.{ .host = "h" }
+    );
+    const cfg = try serval.zon.decodeFromReader(Config, arena.allocator(), &reader, .{ .memory = .arena });
+    try std.testing.expectEqualStrings("h", cfg.host);
+
+    var buf: [64]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    const P = struct { x: i32 };
+    try serval.zon.encodeToWriter(P, .{ .x = 1 }, .{}, &w);
+    try std.testing.expectEqualStrings(".{.x=1}", w.buffered());
+}
+
 test "zon encode minified vs pretty" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

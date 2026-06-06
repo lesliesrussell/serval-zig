@@ -25,6 +25,15 @@ pub fn decode(
     options: codec.DecodeOptions,
 ) Error!T {
     const result = try decodeResult(T, allocator, input, options);
+    return unwrapResult(T, allocator, result);
+}
+
+// serval-x09: report→error mapping shared by the typed fast paths.
+fn unwrapResult(
+    comptime T: type,
+    allocator: std.mem.Allocator,
+    result: core.DecodeResult(T),
+) Error!T {
     switch (result) {
         // serval-w98: fast path drops lax warnings and collected unknowns.
         .ok => |ok| {
@@ -82,7 +91,7 @@ pub fn decodeResult(
     var nesting_buf: [256]u8 = undefined;
     var nesting_fba = std.heap.FixedBufferAllocator.init(&nesting_buf);
 
-    var d = Decoder{
+    var d = Decoder(std.json.Scanner){
         .scanner = std.json.Scanner.initCompleteInput(nesting_fba.allocator(), input),
         .allocator = allocator,
         .options = options,
@@ -96,11 +105,60 @@ pub fn decodeResult(
     // expected to live in a caller arena.
     defer d.unknown.deinit(allocator);
 
-    const value = decodeTop(T, &d) catch |e| switch (e) {
+    return finishDecode(T, allocator, options, &d, &ctx);
+}
+
+// serval-x09
+/// Streaming variants of decode/decodeResult over std.Io.Reader. The
+/// reader is tokenized incrementally via std.json.Reader; nesting
+/// bookkeeping uses the value allocator (no zero-alloc guarantee here).
+pub fn decodeFromReader(
+    comptime T: type,
+    allocator: std.mem.Allocator,
+    io_reader: *std.Io.Reader,
+    options: codec.DecodeOptions,
+) Error!T {
+    const result = try decodeResultFromReader(T, allocator, io_reader, options);
+    return unwrapResult(T, allocator, result);
+}
+
+// serval-x09
+pub fn decodeResultFromReader(
+    comptime T: type,
+    allocator: std.mem.Allocator,
+    io_reader: *std.Io.Reader,
+    options: codec.DecodeOptions,
+) error{OutOfMemory}!core.DecodeResult(T) {
+    var ctx = core.ValidateContext.init(allocator);
+    defer ctx.deinit();
+
+    var d = Decoder(std.json.Reader){
+        .scanner = std.json.Reader.init(allocator, io_reader),
+        .allocator = allocator,
+        .options = options,
+        .ctx = &ctx,
+        .present = .empty,
+    };
+    defer d.scanner.deinit();
+    defer d.present.deinit(allocator);
+    defer d.unknown.deinit(allocator);
+
+    return finishDecode(T, allocator, options, &d, &ctx);
+}
+
+// serval-x09: pipeline shared by slice and reader entry points.
+fn finishDecode(
+    comptime T: type,
+    allocator: std.mem.Allocator,
+    options: codec.DecodeOptions,
+    d: anytype,
+    ctx: *core.ValidateContext,
+) error{OutOfMemory}!core.DecodeResult(T) {
+    const value = decodeTop(T, d) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         else => return .{ .decode_error = e },
     };
-    const tail = nextToken(&d) catch |e| switch (e) {
+    const tail = nextToken(d) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         else => return .{ .decode_error = e },
     };
@@ -134,19 +192,23 @@ pub fn decodeResult(
     return .{ .ok = .{ .value = value, .unknown = unknown } };
 }
 
-const Decoder = struct {
-    scanner: std.json.Scanner,
-    allocator: std.mem.Allocator,
-    options: codec.DecodeOptions,
-    ctx: *core.ValidateContext,
-    /// Zig field names seen at the top level (comptime strings; no copies).
-    present: std.ArrayList([]const u8),
-    // serval-ee8
-    /// Top-level unknown fields gathered under .collect.
-    unknown: std.ArrayList(core.FieldValue) = .empty,
-};
+// serval-x09: generic over the token source — std.json.Scanner for slices,
+// std.json.Reader for streaming; both expose the same token API.
+fn Decoder(comptime Source: type) type {
+    return struct {
+        scanner: Source,
+        allocator: std.mem.Allocator,
+        options: codec.DecodeOptions,
+        ctx: *core.ValidateContext,
+        /// Zig field names seen at the top level (comptime strings; no copies).
+        present: std.ArrayList([]const u8),
+        // serval-ee8
+        /// Top-level unknown fields gathered under .collect.
+        unknown: std.ArrayList(core.FieldValue) = .empty,
+    };
+}
 
-fn decodeTop(comptime T: type, d: *Decoder) core.DecodeError!T {
+fn decodeTop(comptime T: type, d: anytype) core.DecodeError!T {
     if (@typeInfo(T) == .@"struct") return decodeStruct(T, d, true);
     return decodeAny(T, d, .{});
 }
@@ -155,7 +217,7 @@ fn decodeTop(comptime T: type, d: *Decoder) core.DecodeError!T {
 // enclosing struct's options and flow down through optionals and slices.
 fn decodeAny(
     comptime T: type,
-    d: *Decoder,
+    d: anytype,
     comptime parent: core.TypeOptions,
 ) core.DecodeError!T {
     switch (@typeInfo(T)) {
@@ -209,7 +271,7 @@ fn decodeAny(
 }
 
 // serval-x9g
-fn decodeUnion(comptime T: type, d: *Decoder) core.DecodeError!T {
+fn decodeUnion(comptime T: type, d: anytype) core.DecodeError!T {
     const info = @typeInfo(T).@"union";
     if (info.tag_type == null)
         @compileError("serval-json: untagged Zig unions unsupported: " ++ @typeName(T));
@@ -230,7 +292,7 @@ fn decodeUnion(comptime T: type, d: *Decoder) core.DecodeError!T {
 // serval-x9g
 fn decodeUnionExternal(
     comptime T: type,
-    d: *Decoder,
+    d: anytype,
     comptime opts: core.TypeOptions,
 ) core.DecodeError!T {
     switch (try peek(d)) {
@@ -278,7 +340,7 @@ fn decodeUnionExternal(
 // serval-x9g
 fn decodeUnionAdjacent(
     comptime T: type,
-    d: *Decoder,
+    d: anytype,
     comptime opts: core.TypeOptions,
 ) core.DecodeError!T {
     switch (try nextToken(d)) {
@@ -319,7 +381,7 @@ fn decodeUnionAdjacent(
     return error.InvalidEnumTag;
 }
 
-fn decodeStruct(comptime T: type, d: *Decoder, comptime is_top: bool) core.DecodeError!T {
+fn decodeStruct(comptime T: type, d: anytype, comptime is_top: bool) core.DecodeError!T {
     switch (try nextToken(d)) {
         .object_begin => {},
         else => return error.UnexpectedToken,
@@ -397,7 +459,7 @@ fn decodeStruct(comptime T: type, d: *Decoder, comptime is_top: bool) core.Decod
 // serval-ee8
 /// Dynamic decode into the format-neutral core.Value. Used for collected
 /// unknown fields; also the future home of internal/untagged union tagging.
-fn decodeValue(d: *Decoder) core.DecodeError!core.Value {
+fn decodeValue(d: anytype) core.DecodeError!core.Value {
     switch (try peek(d)) {
         .true => {
             _ = try nextToken(d);
@@ -454,7 +516,7 @@ fn decodeValue(d: *Decoder) core.DecodeError!core.Value {
 
 fn decodeSlice(
     comptime Child: type,
-    d: *Decoder,
+    d: anytype,
     comptime parent: core.TypeOptions,
 ) core.DecodeError![]const Child {
     switch (try nextToken(d)) {
@@ -474,15 +536,15 @@ fn decodeSlice(
     return list.toOwnedSlice(d.allocator) catch return error.OutOfMemory;
 }
 
-fn nextToken(d: *Decoder) core.DecodeError!std.json.Token {
+fn nextToken(d: anytype) core.DecodeError!std.json.Token {
     return d.scanner.nextAlloc(d.allocator, .alloc_if_needed) catch |e| mapScanError(e);
 }
 
-fn peek(d: *Decoder) core.DecodeError!std.json.TokenType {
+fn peek(d: anytype) core.DecodeError!std.json.TokenType {
     return d.scanner.peekNextTokenType() catch |e| mapScanError(e);
 }
 
-fn numberSlice(d: *Decoder) core.DecodeError![]const u8 {
+fn numberSlice(d: anytype) core.DecodeError![]const u8 {
     return switch (try nextToken(d)) {
         .number, .allocated_number => |s| s,
         else => error.UnexpectedToken,
@@ -491,7 +553,7 @@ fn numberSlice(d: *Decoder) core.DecodeError![]const u8 {
 
 /// `dupe_for_owned`: with MemoryMode.owned, unescaped string tokens (which
 /// borrow from the input buffer) are duplicated so the result outlives it.
-fn stringSlice(d: *Decoder, dupe_for_owned: bool) core.DecodeError![]const u8 {
+fn stringSlice(d: anytype, dupe_for_owned: bool) core.DecodeError![]const u8 {
     return switch (try nextToken(d)) {
         .string => |s| if (dupe_for_owned and d.options.memory == .owned)
             d.allocator.dupe(u8, s) catch error.OutOfMemory
@@ -508,6 +570,8 @@ fn mapScanError(e: anyerror) core.DecodeError {
         // fixed nesting buffer overflowing past 1024 levels.
         error.OutOfMemory => error.OutOfMemory,
         error.UnexpectedEndOfInput => error.UnexpectedEndOfInput,
+        // serval-x09
+        error.ReadFailed => error.ReadFailed,
         else => error.InvalidSyntax,
     };
 }

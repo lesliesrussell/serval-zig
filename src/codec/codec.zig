@@ -12,6 +12,13 @@ pub fn assertBackend(comptime Backend: type) void {
         @compileError(@typeName(Backend) ++ " missing decodeFromSlice");
     if (!@hasDecl(Backend, "encodeToSlice"))
         @compileError(@typeName(Backend) ++ " missing encodeToSlice");
+    // serval-x09
+    if (!@hasDecl(Backend, "decodeFromReader"))
+        @compileError(@typeName(Backend) ++ " missing decodeFromReader");
+    if (!@hasDecl(Backend, "encodeToWriter"))
+        @compileError(@typeName(Backend) ++ " missing encodeToWriter");
+    if (!@hasDecl(Backend, "measureEncodedLen"))
+        @compileError(@typeName(Backend) ++ " missing measureEncodedLen");
 }
 
 pub const DecodeOptions = options.DecodeOptions;

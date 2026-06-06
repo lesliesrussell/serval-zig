@@ -13,5 +13,9 @@ pub const zon = @import("zon.zig");
 pub const decode = zon.decode;
 pub const decodeResult = zon.decodeResult;
 pub const encodeAlloc = zon.encodeAlloc;
+// serval-x09
+pub const decodeFromReader = zon.decodeFromReader;
+pub const encodeToWriter = zon.encodeToWriter;
+pub const measureEncodedLen = zon.measureEncodedLen;
 pub const DecodeOptions = zon.DecodeOptions;
 pub const EncodeOptions = zon.EncodeOptions;

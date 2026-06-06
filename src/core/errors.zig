@@ -74,4 +74,6 @@ pub const DecodeError = error{
     UnknownField,
     MissingRequiredField,
     InvalidEnumTag,
+    // serval-x09: streaming source failed mid-decode.
+    ReadFailed,
 };

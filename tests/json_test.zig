@@ -694,6 +694,47 @@ test "untagged union: no matching variant is decode error" {
     try std.testing.expectError(error.InvalidEnumTag, result);
 }
 
+// serval-x09
+test "decodeFromReader: streaming source" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var reader = std.Io.Reader.fixed(fixtures.sample_user_json);
+    const user = try serval.json.decodeFromReader(User, arena.allocator(), &reader, .{});
+    try std.testing.expectEqual(@as(u64, 1), user.id);
+    try std.testing.expectEqualStrings("ada", user.name);
+}
+
+test "decodeFromReader: validation still applies" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var reader = std.Io.Reader.fixed(
+        \\{"name":"a"}
+    );
+    const result = serval.json.decodeFromReader(Limits, arena.allocator(), &reader, .{});
+    try std.testing.expectError(error.ValidationFailed, result);
+}
+
+test "encodeToWriter: writes through std.Io.Writer" {
+    var buf: [64]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    const point = struct { x: i32, y: i32 }{ .x = 1, .y = 2 };
+    try serval.json.encodeToWriter(@TypeOf(point), point, .{}, &w);
+    try std.testing.expectEqualStrings(
+        \\{"x":1,"y":2}
+    , w.buffered());
+}
+
+test "measureEncodedLen matches encodeAlloc" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const user = User{ .id = 7, .name = "kay", .email = "k@e.io", .age = 21 };
+    const encoded = try serval.json.encodeAlloc(User, arena.allocator(), user, .{});
+    try std.testing.expectEqual(encoded.len, serval.json.measureEncodedLen(User, user, .{}));
+}
+
 test "json roundtrip" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
