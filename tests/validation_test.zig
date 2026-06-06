@@ -150,19 +150,41 @@ test "pattern: non-matching string reported" {
     try std.testing.expectEqualStrings("code", report.issues[0].path.segments[0].field);
 }
 
-test "pattern: invalid regex reported as issue" {
-    const Broken = struct {
-        s: []const u8,
+// serval-yus: invalid .pattern regexes are now compile errors, not
+// runtime issues — uncompilable patterns can't ship.
 
-        pub const serval = .{
-            .fields = .{ .s = .{ .pattern = "[unclosed" } },
-        };
+// serval-yus
+const Reading = struct {
+    temp: f64,
+    ratio: f32 = 0.5,
+
+    pub const serval = .{
+        .fields = .{
+            .temp = .{ .min = -40, .max = 125 },
+            .ratio = .{ .gt = 0, .lt = 1 },
+        },
     };
-    const v = Broken{ .s = "anything" };
-    const report = try checkAlloc(Broken, &v);
-    defer std.testing.allocator.free(report.issues);
+};
+
+test "float: integral bounds applied" {
+    const hot = Reading{ .temp = 200 };
+    var report = try checkAlloc(Reading, &hot);
     try std.testing.expectEqual(@as(usize, 1), report.issues.len);
-    try std.testing.expectEqual(serval.core.IssueCode.pattern, report.issues[0].code);
+    try std.testing.expectEqual(serval.core.IssueCode.max, report.issues[0].code);
+    try std.testing.expectEqual(@as(f64, 200), report.issues[0].actual.?.float);
+    std.testing.allocator.free(report.issues);
+
+    const edge = Reading{ .temp = 20, .ratio = 1 };
+    report = try checkAlloc(Reading, &edge);
+    defer std.testing.allocator.free(report.issues);
+    try std.testing.expectEqual(serval.core.IssueCode.lt, report.issues[0].code);
+}
+
+test "float: in-range value passes" {
+    const ok_val = Reading{ .temp = 21.5 };
+    const report = try checkAlloc(Reading, &ok_val);
+    defer std.testing.allocator.free(report.issues);
+    try std.testing.expect(report.ok());
 }
 
 // serval-bfp

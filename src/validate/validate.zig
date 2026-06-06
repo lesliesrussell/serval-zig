@@ -52,6 +52,8 @@ fn checkValue(comptime f: core.Field, v: anytype, ctx: *core.ValidateContext) vo
     switch (@typeInfo(V)) {
         .optional => if (v) |payload| checkValue(f, payload, ctx),
         .int => checkScalar(f, v, ctx),
+        // serval-yus
+        .float => checkScalarFloat(f, v, ctx),
         .pointer => |p| {
             if (p.size != .slice) return;
             if (p.child == u8)
@@ -59,7 +61,6 @@ fn checkValue(comptime f: core.Field, v: anytype, ctx: *core.ValidateContext) vo
             else
                 checkCollection(f, v, ctx);
         },
-        // TODO(serval): float scalar rules once FieldMeta grows f64 bounds.
         else => {},
     }
 }
@@ -72,6 +73,36 @@ fn checkScalar(comptime f: core.Field, v: anytype, ctx: *core.ValidateContext) v
     if (m.max) |lim| if (x > lim) issueScalar(f, ctx, .max, "value above maximum", lim, v);
     if (m.gt) |lim| if (x <= lim) issueScalar(f, ctx, .gt, "value must be greater", lim, v);
     if (m.lt) |lim| if (x >= lim) issueScalar(f, ctx, .lt, "value must be smaller", lim, v);
+}
+
+// serval-yus
+/// Floats reuse the i64 scalar bounds — integral bounds only (a .min of
+/// 0.5 is not expressible; use a custom validator for fractional limits).
+fn checkScalarFloat(comptime f: core.Field, v: anytype, ctx: *core.ValidateContext) void {
+    const m = f.meta;
+    const x: f64 = v;
+    if (m.min) |lim| if (x < @as(f64, @floatFromInt(lim))) issueFloat(f, ctx, .min, "value below minimum", lim, x);
+    if (m.max) |lim| if (x > @as(f64, @floatFromInt(lim))) issueFloat(f, ctx, .max, "value above maximum", lim, x);
+    if (m.gt) |lim| if (x <= @as(f64, @floatFromInt(lim))) issueFloat(f, ctx, .gt, "value must be greater", lim, x);
+    if (m.lt) |lim| if (x >= @as(f64, @floatFromInt(lim))) issueFloat(f, ctx, .lt, "value must be smaller", lim, x);
+}
+
+// serval-yus
+fn issueFloat(
+    comptime f: core.Field,
+    ctx: *core.ValidateContext,
+    code: core.IssueCode,
+    message: []const u8,
+    expected: i64,
+    actual: f64,
+) void {
+    ctx.issue(.{
+        .path = .field(f.name),
+        .code = code,
+        .message = message,
+        .expected = .{ .int = expected },
+        .actual = .{ .float = actual },
+    });
 }
 
 // serval-bfp
@@ -121,26 +152,18 @@ fn checkString(comptime f: core.Field, v: []const u8, ctx: *core.ValidateContext
         .message = "not a valid URL",
         .actual = .{ .string = v },
     });
-    // serval-bcz
+    // serval-yus: patterns compile once at comptime; an uncompilable
+    // pattern is a compile error, not a runtime issue.
     if (m.pattern) |pat| {
-        // TODO(serval): comptime-compile patterns once per type instead of
-        // per check() call.
-        if (mvzr.compile(pat)) |rx| {
-            if (!rx.isMatch(v)) ctx.issue(.{
-                .path = .field(f.name),
-                .code = .pattern,
-                .message = "string does not match pattern",
-                .expected = .{ .string = pat },
-                .actual = .{ .string = v },
-            });
-        } else {
-            ctx.issue(.{
-                .path = .field(f.name),
-                .code = .pattern,
-                .message = "invalid regex in .pattern rule",
-                .expected = .{ .string = pat },
-            });
-        }
+        const rx = comptime mvzr.compile(pat) orelse
+            @compileError("serval: invalid regex in .pattern rule: " ++ pat);
+        if (!rx.isMatch(v)) ctx.issue(.{
+            .path = .field(f.name),
+            .code = .pattern,
+            .message = "string does not match pattern",
+            .expected = .{ .string = pat },
+            .actual = .{ .string = v },
+        });
     }
 }
 
