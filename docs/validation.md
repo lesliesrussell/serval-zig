@@ -58,3 +58,13 @@ coercion is a decode-time concern.
   out-of-range is `Overflow`), int 0/1 ↔ bool, scalar → string
 
 Constraints always run against the coerced value.
+
+## Message conventions
+
+Issue codes are the stable machine layer; messages are human-facing and
+follow: lowercase, no trailing period, the violated limit embedded
+("below minimum 13", "shorter than minimum length 3", "does not match
+pattern \"a+\"") — limits are comptime, so this costs nothing at
+runtime. `report.render(writer)` produces the human view: one line per
+issue, full nested/array path first, expected/actual appended when
+present; issues arrive in field-walk order so related paths cluster.

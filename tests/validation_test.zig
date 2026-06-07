@@ -606,6 +606,51 @@ test "field validator: decode path sees the transformed value" {
     try std.testing.expectEqualStrings("hey", v.name);
 }
 
+// serval-3g8
+test "error UX: messages carry their limits" {
+    const T = struct {
+        age: u8 = 50,
+        name: []const u8 = "okay",
+
+        pub const serval = .{ .fields = .{
+            .age = .{ .min = 13 },
+            .name = .{ .min_len = 3 },
+        } };
+    };
+    const v = T{ .age = 9, .name = "x" };
+    const report = try checkAlloc(T, &v);
+    defer report.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("below minimum 13", report.issues[0].message);
+    try std.testing.expectEqualStrings("shorter than minimum length 3", report.issues[1].message);
+}
+
+test "error UX: report renders grouped, path-first, with expected/actual" {
+    const Address2 = struct {
+        zip: []const u8 = "12345",
+
+        pub const serval = .{ .fields = .{ .zip = .{ .min_len = 5 } } };
+    };
+    const Customer2 = struct {
+        age: u8 = 30,
+        addresses: []const Address2 = &.{},
+
+        pub const serval = .{ .fields = .{ .age = .{ .min = 13 } } };
+    };
+    const v = Customer2{ .age = 9, .addresses = &.{ .{}, .{ .zip = "1" } } };
+    const report = try checkAlloc(Customer2, &v);
+    defer report.deinit(std.testing.allocator);
+
+    var buf: [512]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try report.render(&w);
+    try std.testing.expectEqualStrings(
+        \\validation failed (2 issues):
+        \\  .age: below minimum 13 (expected 13, actual 9)
+        \\  .addresses[1].zip: shorter than minimum length 5 (expected 5, actual 1)
+        \\
+    , w.buffered());
+}
+
 // serval-bfp
 const Minor = struct {
     age: u8,

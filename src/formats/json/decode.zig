@@ -548,7 +548,7 @@ fn decodeStruct(comptime T: type, d: anytype, comptime is_top: bool) core.Decode
                 d.ctx.issue(.{
                     .path = .root,
                     .code = .unknown_field,
-                    .message = "unknown field in input",
+                    .message = "unknown field",
                 });
                 d.scanner.skipValue() catch |e| return mapScanError(e);
             },

@@ -509,7 +509,7 @@ pub fn Backend(comptime Wire: type) type {
                         d.ctx.issue(.{
                             .path = .root,
                             .code = .unknown_field,
-                            .message = "unknown field in input",
+                            .message = "unknown field",
                         });
                         try skipValue(d);
                     },

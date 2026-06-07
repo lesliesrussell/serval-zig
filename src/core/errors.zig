@@ -83,7 +83,49 @@ pub const ValidationReport = struct {
         for (self.issues) |i| allocator.free(i.path.segments);
         allocator.free(self.issues);
     }
+
+    // serval-3g8
+    /// Human-readable rendering: one line per issue, path-first (full
+    /// nested/array paths), expected/actual appended when present.
+    /// Issues arrive in field-walk order, so related paths cluster.
+    pub fn render(self: ValidationReport, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        try writer.print("validation failed ({d} issue{s}):\n", .{
+            self.issues.len,
+            if (self.issues.len == 1) "" else "s",
+        });
+        for (self.issues) |i| {
+            try writer.print("  {f}: {s}", .{ i.path, i.message });
+            if (i.expected != null or i.actual != null) {
+                try writer.writeAll(" (");
+                if (i.expected) |e| {
+                    try writer.writeAll("expected ");
+                    try renderValueBrief(e, writer);
+                }
+                if (i.actual) |a| {
+                    if (i.expected != null) try writer.writeAll(", ");
+                    try writer.writeAll("actual ");
+                    try renderValueBrief(a, writer);
+                }
+                try writer.writeAll(")");
+            }
+            try writer.writeAll("\n");
+        }
+    }
 };
+
+// serval-3g8
+fn renderValueBrief(v: value_mod.Value, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+    switch (v) {
+        .null => try writer.writeAll("null"),
+        .bool => |b| try writer.writeAll(if (b) "true" else "false"),
+        .int => |n| try writer.print("{d}", .{n}),
+        .float => |f| try writer.print("{d}", .{f}),
+        .string => |s| try writer.print("\"{s}\"", .{s}),
+        .bytes => |b| try writer.print("{d} bytes", .{b.len}),
+        .array => |a| try writer.print("[{d} items]", .{a.len}),
+        .object => |o| try writer.print("{{{d} fields}}", .{o.len}),
+    }
+}
 
 /// Syntax-level failures — a different class of problem from semantic
 /// validation failures (which produce a ValidationReport instead).

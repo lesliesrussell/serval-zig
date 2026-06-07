@@ -279,17 +279,17 @@ fn checkFieldNode(
                     if (m.nonempty and items.len == 0) ctx.issue(.{
                         .path = .field(sf.name),
                         .code = .nonempty,
-                        .message = "collection must not be empty",
+                        .message = "must not be empty",
                     });
                     if (m.min_items) |lim| if (items.len < lim) ctx.issue(.{
                         .path = .field(sf.name),
                         .code = .min_items,
-                        .message = "fewer items than min_items",
+                        .message = comptime std.fmt.comptimePrint("fewer than {d} items", .{m.min_items.?}),
                     });
                     if (m.max_items) |lim| if (items.len > lim) ctx.issue(.{
                         .path = .field(sf.name),
                         .code = .max_items,
-                        .message = "more items than max_items",
+                        .message = comptime std.fmt.comptimePrint("more than {d} items", .{m.max_items.?}),
                     });
                     // serval-m9b: unique on the dynamic path uses deepEql
                     // over Value — variant-strict (int 1 ≠ float 1.0).
@@ -300,7 +300,7 @@ fn checkFieldNode(
                                     ctx.issue(.{
                                         .path = .field(sf.name),
                                         .code = .unique,
-                                        .message = "duplicate items in unique collection",
+                                        .message = "contains duplicate items",
                                     });
                                     break :outer;
                                 }
@@ -388,10 +388,10 @@ fn checkValue(comptime f: core.Field, v: anytype, ctx: *core.ValidateContext) vo
 fn checkScalar(comptime f: core.Field, v: anytype, ctx: *core.ValidateContext) void {
     const m = f.meta;
     const x: i128 = v;
-    if (m.min) |lim| if (x < lim) issueScalar(f, ctx, .min, "value below minimum", lim, v);
-    if (m.max) |lim| if (x > lim) issueScalar(f, ctx, .max, "value above maximum", lim, v);
-    if (m.gt) |lim| if (x <= lim) issueScalar(f, ctx, .gt, "value must be greater", lim, v);
-    if (m.lt) |lim| if (x >= lim) issueScalar(f, ctx, .lt, "value must be smaller", lim, v);
+    if (m.min) |lim| if (x < lim) issueScalar(f, ctx, .min, comptime std.fmt.comptimePrint("below minimum {d}", .{m.min.?}), lim, v);
+    if (m.max) |lim| if (x > lim) issueScalar(f, ctx, .max, comptime std.fmt.comptimePrint("above maximum {d}", .{m.max.?}), lim, v);
+    if (m.gt) |lim| if (x <= lim) issueScalar(f, ctx, .gt, comptime std.fmt.comptimePrint("must be greater than {d}", .{m.gt.?}), lim, v);
+    if (m.lt) |lim| if (x >= lim) issueScalar(f, ctx, .lt, comptime std.fmt.comptimePrint("must be less than {d}", .{m.lt.?}), lim, v);
     // serval-elw
     if (m.one_of) |allowed| {
         for (allowed) |a| {
@@ -400,7 +400,7 @@ fn checkScalar(comptime f: core.Field, v: anytype, ctx: *core.ValidateContext) v
         ctx.issue(.{
             .path = .field(f.name),
             .code = .one_of,
-            .message = "value not in allowed set",
+            .message = comptime std.fmt.comptimePrint("not one of {d} allowed values", .{m.one_of.?.len}),
             // serval-dfo (D1): i128 payload holds any supported int.
             .actual = .{ .int = x },
         });
@@ -413,10 +413,10 @@ fn checkScalar(comptime f: core.Field, v: anytype, ctx: *core.ValidateContext) v
 fn checkScalarFloat(comptime f: core.Field, v: anytype, ctx: *core.ValidateContext) void {
     const m = f.meta;
     const x: f64 = v;
-    if (m.min) |lim| if (x < @as(f64, @floatFromInt(lim))) issueFloat(f, ctx, .min, "value below minimum", lim, x);
-    if (m.max) |lim| if (x > @as(f64, @floatFromInt(lim))) issueFloat(f, ctx, .max, "value above maximum", lim, x);
-    if (m.gt) |lim| if (x <= @as(f64, @floatFromInt(lim))) issueFloat(f, ctx, .gt, "value must be greater", lim, x);
-    if (m.lt) |lim| if (x >= @as(f64, @floatFromInt(lim))) issueFloat(f, ctx, .lt, "value must be smaller", lim, x);
+    if (m.min) |lim| if (x < @as(f64, @floatFromInt(lim))) issueFloat(f, ctx, .min, comptime std.fmt.comptimePrint("below minimum {d}", .{m.min.?}), lim, x);
+    if (m.max) |lim| if (x > @as(f64, @floatFromInt(lim))) issueFloat(f, ctx, .max, comptime std.fmt.comptimePrint("above maximum {d}", .{m.max.?}), lim, x);
+    if (m.gt) |lim| if (x <= @as(f64, @floatFromInt(lim))) issueFloat(f, ctx, .gt, comptime std.fmt.comptimePrint("must be greater than {d}", .{m.gt.?}), lim, x);
+    if (m.lt) |lim| if (x >= @as(f64, @floatFromInt(lim))) issueFloat(f, ctx, .lt, comptime std.fmt.comptimePrint("must be less than {d}", .{m.lt.?}), lim, x);
 }
 
 // serval-yus
@@ -463,7 +463,7 @@ fn checkString(comptime f: core.Field, v: []const u8, ctx: *core.ValidateContext
     if (m.nonempty and v.len == 0) ctx.issue(.{
         .path = .field(f.name),
         .code = .nonempty,
-        .message = "string must not be empty",
+        .message = "must not be empty",
     });
     if (m.one_of_str) |allowed| {
         const member = for (allowed) |a| {
@@ -472,21 +472,21 @@ fn checkString(comptime f: core.Field, v: []const u8, ctx: *core.ValidateContext
         if (!member) ctx.issue(.{
             .path = .field(f.name),
             .code = .one_of,
-            .message = "string not in allowed set",
+            .message = comptime std.fmt.comptimePrint("not one of {d} allowed strings", .{m.one_of_str.?.len}),
             .actual = .{ .string = v },
         });
     }
     if (m.min_len) |lim| if (v.len < lim) ctx.issue(.{
         .path = .field(f.name),
         .code = .min_len,
-        .message = "string shorter than min_len",
+        .message = comptime std.fmt.comptimePrint("shorter than minimum length {d}", .{m.min_len.?}),
         .expected = .{ .int = @intCast(lim) },
         .actual = .{ .int = @intCast(v.len) },
     });
     if (m.max_len) |lim| if (v.len > lim) ctx.issue(.{
         .path = .field(f.name),
         .code = .max_len,
-        .message = "string longer than max_len",
+        .message = comptime std.fmt.comptimePrint("longer than maximum length {d}", .{m.max_len.?}),
         .expected = .{ .int = @intCast(lim) },
         .actual = .{ .int = @intCast(v.len) },
     });
@@ -499,7 +499,7 @@ fn checkString(comptime f: core.Field, v: []const u8, ctx: *core.ValidateContext
     if (m.url and !isUrl(v)) ctx.issue(.{
         .path = .field(f.name),
         .code = .url,
-        .message = "not a valid URL",
+        .message = "not a valid url",
         .actual = .{ .string = v },
     });
     // serval-yus: patterns compile once at comptime; an uncompilable
@@ -515,7 +515,7 @@ fn checkString(comptime f: core.Field, v: []const u8, ctx: *core.ValidateContext
         if (!matched) ctx.issue(.{
             .path = .field(f.name),
             .code = .pattern,
-            .message = "string does not match pattern",
+            .message = comptime std.fmt.comptimePrint("does not match pattern \"{s}\"", .{m.pattern.?}),
             .expected = .{ .string = pat },
             .actual = .{ .string = v },
         });
@@ -529,19 +529,19 @@ fn checkCollection(comptime f: core.Field, v: anytype, ctx: *core.ValidateContex
     if (m.nonempty and v.len == 0) ctx.issue(.{
         .path = .field(f.name),
         .code = .nonempty,
-        .message = "collection must not be empty",
+        .message = "must not be empty",
     });
     if (m.min_items) |lim| if (v.len < lim) ctx.issue(.{
         .path = .field(f.name),
         .code = .min_items,
-        .message = "fewer items than min_items",
+        .message = comptime std.fmt.comptimePrint("fewer than {d} items", .{m.min_items.?}),
         .expected = .{ .int = @intCast(lim) },
         .actual = .{ .int = @intCast(v.len) },
     });
     if (m.max_items) |lim| if (v.len > lim) ctx.issue(.{
         .path = .field(f.name),
         .code = .max_items,
-        .message = "more items than max_items",
+        .message = comptime std.fmt.comptimePrint("more than {d} items", .{m.max_items.?}),
         .expected = .{ .int = @intCast(lim) },
         .actual = .{ .int = @intCast(v.len) },
     });
@@ -553,7 +553,7 @@ fn checkCollection(comptime f: core.Field, v: anytype, ctx: *core.ValidateContex
                     ctx.issue(.{
                         .path = .field(f.name),
                         .code = .unique,
-                        .message = "duplicate items in unique collection",
+                        .message = "contains duplicate items",
                     });
                     break :outer;
                 }
