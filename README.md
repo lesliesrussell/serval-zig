@@ -80,6 +80,11 @@ const json_out = try serval.json.encodeAlloc(User, allocator, user, .{ .pretty =
 
 See `docs/architecture.md` for the design.
 
+## License
+
+MIT — see [LICENSE](LICENSE). The vendored mvzr dependency is also MIT
+(license included under zig-pkg/).
+
 ## Build
 
 Requires Zig 0.16.0+. One dependency: [mvzr](https://github.com/mnemnion/mvzr)
