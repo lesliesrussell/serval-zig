@@ -108,6 +108,8 @@ pub fn build(b: *std.Build) void {
         "tests/spec_test.zig",
         // serval-9a3
         "tests/conformance_test.zig",
+        // serval-9ov
+        "tests/schema_export_test.zig",
     };
     for (test_files) |tf| {
         const t = b.addTest(.{

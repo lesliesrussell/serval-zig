@@ -18,6 +18,8 @@ pub const msgpack = @import("serval-msgpack");
 pub const cbor = @import("serval-cbor");
 
 pub const derive = @import("derive/derive.zig");
+// serval-9ov
+pub const schema_export = @import("export/json_schema.zig");
 
 pub const testing = struct {
     pub const fixtures = @import("testing/fixtures.zig");
