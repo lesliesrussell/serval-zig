@@ -62,3 +62,11 @@ units) and MessagePack; length-first-then-bytes for CBOR per RFC 8949
 §4.2.1 (bytewise order of the encoded key). Canonical implies minified.
 Deviation from §4.2.2: floats stay fixed-width (f32/f64), not
 shortest-form. Decode is unaffected. ZON has no canonical mode.
+
+## Policy presets
+
+`codec.Policy` bundles decode+encode knobs into one shareable value;
+existing call sites take `policy.decode` / `policy.encode` unchanged.
+Shipped presets: `.strict` (the defaults), `.lenient` (ignore unknowns,
+safe coercion, lax validation), `.canonical_io` (canonical output,
+strict decode). Presets are starting points — copy and adjust fields.

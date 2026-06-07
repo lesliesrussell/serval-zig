@@ -329,6 +329,35 @@ test "canonical: roundtrips and measure stay correct" {
     }
 }
 
+// --- Policy presets (serval-4e7) -------------------------------------------
+
+test "policy: presets bundle the knobs and flow into existing call sites" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // strict is the default surface
+    try std.testing.expectEqual(serval.codec.DecodeOptions{}, serval.codec.Policy.strict.decode);
+
+    // lenient: tolerant ingestion
+    const lenient = serval.codec.Policy.lenient;
+    try std.testing.expectEqual(.ignore, lenient.decode.unknown_fields);
+    try std.testing.expectEqual(.safe, lenient.decode.coercion);
+    try std.testing.expectEqual(.lax, lenient.decode.validation);
+
+    // canonical_io: deterministic output
+    try std.testing.expect(serval.codec.Policy.canonical_io.encode.canonical);
+
+    // one policy value shared across backends and directions
+    const Msg = struct { n: u8 = 0, s: []const u8 = "" };
+    const policy = lenient;
+    inline for (full_backends) |B| {
+        const wire = try B.encodeAlloc(struct { n: []const u8, extra: u8 }, a, .{ .n = "42", .extra = 1 }, policy.encode);
+        const v = try B.decode(Msg, a, wire, policy.decode);
+        try std.testing.expectEqual(@as(u8, 42), v.n);
+    }
+}
+
 // --- Declared gaps stay declared -----------------------------------------
 
 test "conformance: zon's shape-error folding is the documented gap, not silent drift" {

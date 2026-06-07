@@ -23,6 +23,34 @@ pub const DecodeOptions = struct {
     validation: enum { none, lax, strict } = .strict,
 };
 
+// serval-4e7
+/// A shareable bundle of decode+encode knobs. Existing call sites are
+/// unchanged — pass `policy.decode` / `policy.encode` where the split
+/// options go today. Presets are starting points; copy and adjust.
+pub const Policy = struct {
+    decode: DecodeOptions = .{},
+    encode: EncodeOptions = .{},
+
+    /// The default surface: reject unknowns, no coercion, strict
+    /// validation, owned memory.
+    pub const strict: Policy = .{};
+
+    /// Tolerant ingestion: ignore unknowns, safe coercion, lax validation
+    /// (value returned with warnings attached).
+    pub const lenient: Policy = .{
+        .decode = .{
+            .unknown_fields = .ignore,
+            .coercion = .safe,
+            .validation = .lax,
+        },
+    };
+
+    /// Deterministic output for hashing/content-addressing; strict decode.
+    pub const canonical_io: Policy = .{
+        .encode = .{ .canonical = true },
+    };
+};
+
 pub const EncodeOptions = struct {
     pretty: bool = false,
     // serval-sj2: deterministic output — map keys in canonical order per

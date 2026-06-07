@@ -26,5 +26,7 @@ pub const sortedKeyIndices = codec.sortedKeyIndices;
 // serval-47j
 pub const zeroAllocEligible = borrow.zeroAllocEligible;
 pub const Borrowed = borrow.Borrowed;
+// serval-4e7
+pub const Policy = options.Policy;
 pub const DecodeOptions = options.DecodeOptions;
 pub const EncodeOptions = options.EncodeOptions;
