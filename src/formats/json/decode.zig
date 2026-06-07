@@ -69,7 +69,10 @@ pub fn decodeBorrowed(
 ) Error!codec.borrow.Borrowed(T) {
     var opts = options;
     opts.memory = .borrowed;
-    return .{ .value = try decode(T, allocator, input, opts) };
+    // serval-47j: observable borrowing — count forced allocations.
+    var counting = codec.borrow.CountingAllocator{ .child = allocator };
+    const value = try decode(T, counting.allocator(), input, opts);
+    return .{ .value = value, .allocated = counting.count > 0 };
 }
 
 /// Full decode pipeline: syntax errors land in .decode_error, shape and

@@ -40,7 +40,7 @@ pub fn check(
     checkStructValue(T, value, &ctx);
 
     const issues = try ctx.issues.toOwnedSlice(ctx.allocator);
-    ctx.path_stack.deinit(ctx.allocator);
+    ctx.path_overflow.deinit(ctx.allocator);
     return .{ .issues = issues };
 }
 
@@ -141,7 +141,7 @@ pub fn valueAgainstSchema(
         checkFieldNode(T, .{ .name = "value", .wire_name = "value" }, value, &ctx, .{}, options.coercion);
     }
     const issues = try ctx.issues.toOwnedSlice(ctx.allocator);
-    ctx.path_stack.deinit(ctx.allocator);
+    ctx.path_overflow.deinit(ctx.allocator);
     return .{ .issues = issues };
 }
 

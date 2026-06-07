@@ -30,7 +30,10 @@ std.Io specifics stay isolated in `src/codec/reader.zig` and
 
 - `borrowed` — result slices point into the input buffer; valid only while
   it is. `decodeBorrowed` makes the lifetime explicit via
-  `codec.borrow.Borrowed(T)`. Escape-free flat input decodes with zero heap
+  `codec.borrow.Borrowed(T)`. `Borrowed(T).allocated` reports whether
+  escapes/transforms forced allocation, and comptime
+  `codec.zeroAllocEligible(T)` predicts shape eligibility (nested structs
+  qualify — shallow path bookkeeping is allocation-free to 16 levels). Escape-free flat input decodes with zero heap
   allocations (JSON only).
 - `arena` — transient data into a caller-provided arena. Recommended for
   `.collect` mode and internal/untagged unions (buffered value trees become

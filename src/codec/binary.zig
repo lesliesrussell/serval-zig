@@ -83,7 +83,10 @@ pub fn Backend(comptime Wire: type) type {
         ) Error!borrow.Borrowed(T) {
             var opts = options;
             opts.memory = .borrowed;
-            return .{ .value = try decode(T, allocator, input, opts) };
+            // serval-47j: observable borrowing — count forced allocations.
+            var counting = borrow.CountingAllocator{ .child = allocator };
+            const value = try decode(T, counting.allocator(), input, opts);
+            return .{ .value = value, .allocated = counting.count > 0 };
         }
 
         /// Streaming decode: slurps the reader, then runs the normal

@@ -23,5 +23,8 @@ pub const UnionModeSupport = codec.UnionModeSupport;
 // serval-sj2
 pub const KeyOrder = codec.KeyOrder;
 pub const sortedKeyIndices = codec.sortedKeyIndices;
+// serval-47j
+pub const zeroAllocEligible = borrow.zeroAllocEligible;
+pub const Borrowed = borrow.Borrowed;
 pub const DecodeOptions = options.DecodeOptions;
 pub const EncodeOptions = options.EncodeOptions;

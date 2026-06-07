@@ -996,6 +996,56 @@ test "untagged default .first_match: declaration order wins on overlap" {
     try std.testing.expectEqual(@as(i64, 42), v.count);
 }
 
+// serval-47j
+test "borrowed observability: allocated flag reflects forced allocations" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const Contact = struct { name: []const u8 };
+    // escape-free: pure borrow, no allocations
+    const clean = try serval.json.decodeBorrowed(Contact, arena.allocator(),
+        \\{"name":"ada"}
+    , .{ .validation = .none });
+    try std.testing.expect(!clean.allocated);
+
+    // escaped string forces an allocation
+    const escaped = try serval.json.decodeBorrowed(Contact, arena.allocator(),
+        \\{"name":"a\nb"}
+    , .{ .validation = .none });
+    try std.testing.expect(escaped.allocated);
+}
+
+test "borrowed observability: zeroAllocEligible predicts the failing_allocator outcome" {
+    const Flat = struct { name: []const u8, id: u64, on: bool, age: ?u8 = null, nested: struct { x: f64 = 0 } = .{} };
+    const HasSlice = struct { xs: []const i64 };
+    const HasUnion = struct { u: union(enum) { a: u8 } };
+    const HasLowercase = struct {
+        s: []const u8,
+
+        pub const serval = .{ .fields = .{ .s = .{ .lowercase = true } } };
+    };
+    const HasTrim = struct {
+        s: []const u8,
+
+        pub const serval = .{ .fields = .{ .s = .{ .trim = true } } };
+    };
+
+    comptime {
+        std.debug.assert(serval.codec.zeroAllocEligible(Flat));
+        std.debug.assert(serval.codec.zeroAllocEligible(HasTrim));
+        std.debug.assert(!serval.codec.zeroAllocEligible(HasSlice));
+        std.debug.assert(!serval.codec.zeroAllocEligible(HasUnion));
+        std.debug.assert(!serval.codec.zeroAllocEligible(HasLowercase));
+    }
+
+    // the eligible type really does decode with the failing allocator
+    const b = try serval.json.decodeBorrowed(Flat, std.testing.failing_allocator,
+        \\{"name":"ada","id":1,"on":true,"nested":{"x":0.5}}
+    , .{ .validation = .none });
+    try std.testing.expect(!b.allocated);
+    try std.testing.expectEqualStrings("ada", b.value.name);
+}
+
 test "json roundtrip" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
