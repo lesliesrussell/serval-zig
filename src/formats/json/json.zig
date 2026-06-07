@@ -15,6 +15,7 @@ pub const capabilities: codec.Capabilities = .{
     .rename_metadata = true,
     .shape_issue_fidelity = true,
     .collect_unknown = true,
+    .projection = true,
     .union_external = .streaming,
     .union_adjacent = .streaming,
     .union_internal = .buffered,
@@ -31,6 +32,8 @@ pub const decodeBorrowed = @import("decode.zig").decodeBorrowed;
 pub const decodeValue = @import("decode.zig").decodeValueSlice;
 // serval-x09
 pub const decodeFromReader = @import("decode.zig").decodeFromReader;
+// serval-54c
+pub const decodeProjection = @import("decode.zig").decodeProjection;
 pub const decodeResultFromReader = @import("decode.zig").decodeResultFromReader;
 pub const encodeToWriter = @import("encode.zig").encodeToWriter;
 pub const measureEncodedLen = @import("encode.zig").measureEncodedLen;

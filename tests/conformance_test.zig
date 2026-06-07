@@ -358,6 +358,72 @@ test "policy: presets bundle the knobs and flow into existing call sites" {
     }
 }
 
+// --- Projection (serval-54c) -----------------------------------------------
+
+test "projection: early-exits — the tail of the document is never parsed" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const Head = struct { id: u64, kind: []const u8 };
+
+    // JSON: everything after the projected fields is invalid — a full
+    // decode would fail with InvalidSyntax; projection never reads it.
+    const doc =
+        \\{"id":7,"kind":"ev","payload":[[[[[
+    ;
+    try std.testing.expectError(error.UnexpectedEndOfInput, serval.json.decode(Head, a, doc, .{ .unknown_fields = .ignore }));
+    const p = try serval.json.decodeProjection(Head, a, doc, .{});
+    try std.testing.expectEqual(@as(u64, 7), p.id);
+    try std.testing.expectEqualStrings("ev", p.kind);
+
+    // msgpack: truncate the document right after the projected fields.
+    const Full = struct { id: u64, kind: []const u8, blob: []const u8 };
+    const full = try serval.msgpack.encodeAlloc(Full, a, .{ .id = 7, .kind = "ev", .blob = "xxxxxxxx" }, .{});
+    // chop mid-blob: full decode dies, projection of the leading fields is fine
+    const truncated = full[0 .. full.len - 4];
+    try std.testing.expectError(error.UnexpectedEndOfInput, serval.msgpack.decode(Full, a, truncated, .{}));
+    const mp = try serval.msgpack.decodeProjection(Head, a, truncated, .{});
+    try std.testing.expectEqual(@as(u64, 7), mp.id);
+}
+
+test "projection: unprojected fields between projected ones are skipped" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const Pick = struct { a: u8, z: u8 };
+    const v = try serval.json.decodeProjection(Pick, arena.allocator(),
+        \\{"a":1,"noise":{"deep":[1,2,3]},"z":9,"more":true}
+    , .{});
+    try std.testing.expectEqual(@as(u8, 1), v.a);
+    try std.testing.expectEqual(@as(u8, 9), v.z);
+}
+
+test "projection: shape and constraint validation still apply to P" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const P = struct {
+        name: []const u8,
+
+        pub const serval = .{ .fields = .{ .name = .{ .min_len = 3 } } };
+    };
+    try std.testing.expectError(error.MissingRequiredField, serval.json.decodeProjection(P, a,
+        \\{"other":1}
+    , .{}));
+    try std.testing.expectError(error.ValidationFailed, serval.json.decodeProjection(P, a,
+        \\{"name":"x","rest":0}
+    , .{}));
+}
+
+test "projection: capability flags" {
+    inline for (full_backends) |B| {
+        try std.testing.expect(B.capabilities.projection);
+    }
+    try std.testing.expect(!serval.zon.capabilities.projection);
+}
+
 // --- Declared gaps stay declared -----------------------------------------
 
 test "conformance: zon's shape-error folding is the documented gap, not silent drift" {

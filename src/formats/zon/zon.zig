@@ -16,6 +16,7 @@ pub const capabilities: codec.Capabilities = .{
     .rename_metadata = false,
     .shape_issue_fidelity = false,
     .collect_unknown = false,
+    .projection = false,
     .union_external = .unsupported,
     .union_adjacent = .unsupported,
     .union_internal = .unsupported,

@@ -17,6 +17,8 @@ pub const decodeFromSlice = B.decode;
 pub const decodeResult = B.decodeResult;
 pub const decodeBorrowed = B.decodeBorrowed;
 pub const decodeFromReader = B.decodeFromReader;
+// serval-54c
+pub const decodeProjection = B.decodeProjection;
 pub const decodeValue = B.decodeValueSlice;
 pub const encodeAlloc = B.encodeAlloc;
 pub const encodeToSlice = B.encodeAlloc;

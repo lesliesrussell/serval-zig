@@ -49,6 +49,7 @@ pub fn Backend(comptime Wire: type) type {
             .rename_metadata = true,
             .shape_issue_fidelity = true,
             .collect_unknown = true,
+            .projection = true,
             .union_external = .streaming,
             .union_adjacent = .streaming,
             .union_internal = .buffered,
@@ -159,6 +160,56 @@ pub fn Backend(comptime Wire: type) type {
             };
             if (d.pos != d.buf.len) return .{ .decode_error = error.UnexpectedToken };
 
+            return pipelineTail(T, allocator, options, &d, &ctx, value);
+        }
+
+        // serval-54c
+        /// Partial decode: P is a SUBSET of the document's fields. The
+        /// top-level scan EARLY-EXITS once every field of P has been seen —
+        /// the rest of the document is never parsed (and may be invalid or
+        /// truncated past that point). Validation and presence apply to P.
+        pub fn decodeProjection(
+            comptime P: type,
+            allocator: std.mem.Allocator,
+            input: []const u8,
+            options: DecodeOptions,
+        ) Error!P {
+            var opts = options;
+            opts.unknown_fields = .ignore;
+
+            var ctx = core.ValidateContext.init(allocator);
+            defer ctx.deinit();
+
+            var d = Decoder{
+                .buf = input,
+                .allocator = allocator,
+                .options = opts,
+                .ctx = &ctx,
+                .present = .empty,
+                .projection = true,
+            };
+            defer d.present.deinit(allocator);
+            defer d.unknown.deinit(allocator);
+
+            const value = decodeTop(P, &d) catch |e| switch (e) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => return e,
+            };
+            // no end-of-input check — projection abandons the document
+            const result = try pipelineTail(P, allocator, opts, &d, &ctx, value);
+            return unwrapResult(P, allocator, result);
+        }
+
+        // serval-54c: shape/unknown/validation tail shared by full decode
+        // and projection.
+        fn pipelineTail(
+            comptime T: type,
+            allocator: std.mem.Allocator,
+            options: DecodeOptions,
+            d: *Decoder,
+            ctx: *core.ValidateContext,
+            value: T,
+        ) error{OutOfMemory}!core.DecodeResult(T) {
             // Shape issues: the value may contain undefined fields.
             if (ctx.issues.items.len > 0) {
                 const issues = ctx.issues.toOwnedSlice(ctx.allocator) catch return error.OutOfMemory;
@@ -220,6 +271,10 @@ pub fn Backend(comptime Wire: type) type {
             /// Top-level unknown fields gathered under .collect.
             unknown: std.ArrayList(core.FieldValue) = .empty,
             depth: usize = 0,
+            // serval-54c
+            /// Projection mode: struct decode early-exits once every field
+            /// of the target is seen.
+            projection: bool = false,
 
             fn enterNest(d: *Decoder) core.DecodeError!void {
                 d.depth += 1;
@@ -418,6 +473,8 @@ pub fn Backend(comptime Wire: type) type {
             const struct_fields = @typeInfo(T).@"struct".fields;
             var result: T = undefined;
             var seen = [_]bool{false} ** struct_fields.len;
+            // serval-54c
+            var seen_count: usize = 0;
 
             key_loop: for (0..n) |_| {
                 const key = blk: {
@@ -436,10 +493,14 @@ pub fn Backend(comptime Wire: type) type {
                         @field(result, zf.name) = try decodeAny(zf.type, d, S.options);
                         if (descends) d.ctx.popPath();
                         try validate.coercion.applyStringTransforms(sf.meta, zf.type, &@field(result, zf.name), d.allocator);
+                        // serval-54c
+                        if (!seen[i]) seen_count += 1;
                         seen[i] = true;
                         if (is_top and d.options.validation != .none) {
                             d.present.append(d.allocator, zf.name) catch return error.OutOfMemory;
                         }
+                        // serval-54c: projection — all fields of P seen.
+                        if (is_top and d.projection and seen_count == struct_fields.len) break :key_loop;
                         continue :key_loop;
                     }
                 }

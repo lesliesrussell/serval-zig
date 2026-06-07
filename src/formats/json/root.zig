@@ -14,6 +14,8 @@ pub const decodeBorrowed = json.decodeBorrowed;
 pub const decodeValue = json.decodeValue;
 // serval-x09
 pub const decodeFromReader = json.decodeFromReader;
+// serval-54c
+pub const decodeProjection = json.decodeProjection;
 pub const decodeResultFromReader = json.decodeResultFromReader;
 pub const encodeToWriter = json.encodeToWriter;
 pub const measureEncodedLen = json.measureEncodedLen;

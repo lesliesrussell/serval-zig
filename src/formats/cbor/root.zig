@@ -12,6 +12,7 @@ pub const decode = cbor.decode;
 pub const decodeResult = cbor.decodeResult;
 pub const decodeBorrowed = cbor.decodeBorrowed;
 pub const decodeFromReader = cbor.decodeFromReader;
+pub const decodeProjection = cbor.decodeProjection;
 pub const decodeValue = cbor.decodeValue;
 pub const encodeAlloc = cbor.encodeAlloc;
 pub const encodeToWriter = cbor.encodeToWriter;

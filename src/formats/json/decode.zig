@@ -108,7 +108,7 @@ pub fn decodeResult(
     // expected to live in a caller arena.
     defer d.unknown.deinit(allocator);
 
-    return finishDecode(T, allocator, options, &d, &ctx);
+    return finishDecode(T, allocator, options, &d, &ctx, true);
 }
 
 // serval-l3p
@@ -140,6 +140,43 @@ pub fn decodeValueSlice(
     const v = try decodeValue(&d);
     if (try nextToken(&d) != .end_of_document) return error.InvalidSyntax;
     return v;
+}
+
+// serval-54c
+/// Partial decode: P is a SUBSET of the document's fields (deep
+/// projection = nested subset structs). Unknown fields are skipped at
+/// the token level, and the top-level scan EARLY-EXITS once every field
+/// of P has been seen — the rest of the document is never parsed (and
+/// may even be invalid). Validation and presence apply to P as usual.
+pub fn decodeProjection(
+    comptime P: type,
+    allocator: std.mem.Allocator,
+    input: []const u8,
+    options: codec.DecodeOptions,
+) Error!P {
+    var opts = options;
+    opts.unknown_fields = .ignore;
+
+    var ctx = core.ValidateContext.init(allocator);
+    defer ctx.deinit();
+
+    var nesting_buf: [256]u8 = undefined;
+    var nesting_fba = std.heap.FixedBufferAllocator.init(&nesting_buf);
+
+    var d = Decoder(std.json.Scanner){
+        .scanner = std.json.Scanner.initCompleteInput(nesting_fba.allocator(), input),
+        .allocator = allocator,
+        .options = opts,
+        .ctx = &ctx,
+        .present = .empty,
+        .projection = true,
+    };
+    defer d.scanner.deinit();
+    defer d.present.deinit(allocator);
+    defer d.unknown.deinit(allocator);
+
+    const result = try finishDecode(P, allocator, opts, &d, &ctx, false);
+    return unwrapResult(P, allocator, result);
 }
 
 // serval-x09
@@ -177,7 +214,7 @@ pub fn decodeResultFromReader(
     defer d.present.deinit(allocator);
     defer d.unknown.deinit(allocator);
 
-    return finishDecode(T, allocator, options, &d, &ctx);
+    return finishDecode(T, allocator, options, &d, &ctx, true);
 }
 
 // serval-x09: pipeline shared by slice and reader entry points.
@@ -187,16 +224,20 @@ fn finishDecode(
     options: codec.DecodeOptions,
     d: anytype,
     ctx: *core.ValidateContext,
+    comptime check_tail: bool,
 ) error{OutOfMemory}!core.DecodeResult(T) {
     const value = decodeTop(T, d) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         else => return .{ .decode_error = e },
     };
-    const tail = nextToken(d) catch |e| switch (e) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return .{ .decode_error = e },
-    };
-    if (tail != .end_of_document) return .{ .decode_error = error.InvalidSyntax };
+    // serval-54c: projection abandons the document mid-scan.
+    if (check_tail) {
+        const tail = nextToken(d) catch |e| switch (e) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return .{ .decode_error = e },
+        };
+        if (tail != .end_of_document) return .{ .decode_error = error.InvalidSyntax };
+    }
 
     // Shape issues (missing required, rejected unknown fields): the value
     // may contain undefined fields, so report without touching it further.
@@ -239,6 +280,10 @@ fn Decoder(comptime Source: type) type {
         // serval-ee8
         /// Top-level unknown fields gathered under .collect.
         unknown: std.ArrayList(core.FieldValue) = .empty,
+        // serval-54c
+        /// Projection mode: struct decode early-exits once every field of
+        /// the target is seen; the rest of the container is never parsed.
+        projection: bool = false,
     };
 }
 
@@ -465,6 +510,8 @@ fn decodeStruct(comptime T: type, d: anytype, comptime is_top: bool) core.Decode
     const struct_fields = @typeInfo(T).@"struct".fields;
     var result: T = undefined;
     var seen = [_]bool{false} ** struct_fields.len;
+    // serval-54c
+    var seen_count: usize = 0;
 
     key_loop: while (true) {
         const key = switch (try nextToken(d)) {
@@ -482,12 +529,17 @@ fn decodeStruct(comptime T: type, d: anytype, comptime is_top: bool) core.Decode
                 if (descends) d.ctx.popPath();
                 // serval-au2
                 try validate.coercion.applyStringTransforms(sf.meta, zf.type, &@field(result, zf.name), d.allocator);
+                // serval-54c
+                if (!seen[i]) seen_count += 1;
                 seen[i] = true;
                 // serval-0mq: presence only feeds validation — skip the
                 // allocation entirely when validation is off.
                 if (is_top and d.options.validation != .none) {
                     d.present.append(d.allocator, zf.name) catch return error.OutOfMemory;
                 }
+                // serval-54c: projection — all fields of P seen, abandon
+                // the rest of the container unparsed.
+                if (is_top and d.projection and seen_count == struct_fields.len) break :key_loop;
                 continue :key_loop;
             }
         }

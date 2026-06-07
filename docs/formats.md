@@ -70,3 +70,14 @@ existing call sites take `policy.decode` / `policy.encode` unchanged.
 Shipped presets: `.strict` (the defaults), `.lenient` (ignore unknowns,
 safe coercion, lax validation), `.canonical_io` (canonical output,
 strict decode). Presets are starting points — copy and adjust fields.
+
+## Projection (partial decoding)
+
+`decodeProjection(P, allocator, input, options)` decodes a SUBSET struct
+P from a larger document: unknown fields skip at the token/cursor level,
+and the top-level scan early-exits once every field of P has been seen —
+the rest of the document is never parsed (it may even be invalid or
+truncated past that point, so this is not a validity check). Deep
+projection = nested subset structs (skip-efficient, no early exit below
+the top level). Validation and presence apply to P normally.
+json/msgpack/cbor; see `capabilities.projection`.

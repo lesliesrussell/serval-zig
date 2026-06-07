@@ -77,6 +77,9 @@ pub const Capabilities = struct {
     shape_issue_fidelity: bool,
     /// unknown_fields = .collect gathers into DecodeResult.Ok.unknown.
     collect_unknown: bool,
+    // serval-54c
+    /// decodeProjection: subset-struct decode with top-level early exit.
+    projection: bool,
     union_external: UnionModeSupport,
     union_adjacent: UnionModeSupport,
     union_internal: UnionModeSupport,
