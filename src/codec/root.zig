@@ -20,5 +20,8 @@ pub const fromValue = decode.fromValue;
 // serval-xx5
 pub const Capabilities = codec.Capabilities;
 pub const UnionModeSupport = codec.UnionModeSupport;
+// serval-sj2
+pub const KeyOrder = codec.KeyOrder;
+pub const sortedKeyIndices = codec.sortedKeyIndices;
 pub const DecodeOptions = options.DecodeOptions;
 pub const EncodeOptions = options.EncodeOptions;

@@ -247,6 +247,88 @@ test "capabilities: consumers can comptime-branch on flags" {
     try std.testing.expectEqual(@as(usize, 3), coercion_capable);
 }
 
+// --- Canonical encoding (serval-sj2) --------------------------------------
+
+const Unsorted = struct {
+    bb: i32 = 2,
+    a: i32 = 1,
+    ccc: i32 = 3,
+};
+
+test "canonical: json sorts keys byte-lexicographically and minifies" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const out = try serval.json.encodeAlloc(Unsorted, arena.allocator(), .{}, .{ .canonical = true, .pretty = true });
+    try std.testing.expectEqualStrings(
+        \\{"a":1,"bb":2,"ccc":3}
+    , out);
+}
+
+test "canonical: cbor orders keys length-first per RFC 8949 §4.2.1" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    // "a" (len 1) < "bb" (len 2) < "ccc" (len 3); within a length, bytes.
+    const out = try serval.cbor.encodeAlloc(Unsorted, arena.allocator(), .{}, .{ .canonical = true });
+    const expected = [_]u8{
+        0xa3, // map(3)
+        0x61,
+        'a',
+        0x01,
+        0x62,
+        'b',
+        'b',
+        0x02,
+        0x63,
+        'c',
+        'c',
+        'c',
+        0x03,
+    };
+    try std.testing.expectEqualSlices(u8, &expected, out);
+}
+
+test "canonical: msgpack sorts keys and stays byte-identical across runs" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const one = try serval.msgpack.encodeAlloc(Unsorted, a, .{}, .{ .canonical = true });
+    const two = try serval.msgpack.encodeAlloc(Unsorted, a, .{}, .{ .canonical = true });
+    try std.testing.expectEqualSlices(u8, one, two);
+    // fixmap(3) "a":1 "bb":2 "ccc":3
+    try std.testing.expectEqualSlices(u8, &.{ 0x83, 0xa1, 'a', 0x01, 0xa2, 'b', 'b', 0x02, 0xa3, 'c', 'c', 'c', 0x03 }, one);
+}
+
+test "canonical: internal union splices tag in sorted position" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const Shape = union(enum) {
+        circle: struct { radius: f64, a: i32 },
+
+        pub const serval = .{ .union_tagging = .internal, .union_tag_field = "kind" };
+    };
+    const out = try serval.json.encodeAlloc(Shape, arena.allocator(), .{ .circle = .{ .radius = 2, .a = 1 } }, .{ .canonical = true });
+    try std.testing.expectEqualStrings(
+        \\{"a":1,"kind":"circle","radius":2}
+    , out);
+}
+
+test "canonical: roundtrips and measure stay correct" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    inline for (full_backends) |B| {
+        const v = Unsorted{};
+        const out = try B.encodeAlloc(Unsorted, a, v, .{ .canonical = true });
+        try std.testing.expectEqualDeep(v, try B.decode(Unsorted, a, out, .{}));
+        try std.testing.expectEqual(out.len, B.measureEncodedLen(Unsorted, v, .{ .canonical = true }));
+    }
+}
+
 // --- Declared gaps stay declared -----------------------------------------
 
 test "conformance: zon's shape-error folding is the documented gap, not silent drift" {

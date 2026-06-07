@@ -18,6 +18,8 @@ const validate = @import("serval-validate");
 const options_mod = @import("options.zig");
 const borrow = @import("borrow.zig");
 const from_value = @import("decode.zig");
+// serval-sj2
+const contract = @import("codec.zig");
 
 /// Wire-neutral classification of one binary value's header.
 pub const Header = union(enum) {
@@ -642,8 +644,7 @@ pub fn Backend(comptime Wire: type) type {
             options: EncodeOptions,
             writer: *std.Io.Writer,
         ) std.Io.Writer.Error!void {
-            _ = options;
-            try encodeAny(T, value, writer, .{});
+            try encodeAny(T, value, writer, .{}, options.canonical);
         }
 
         /// Exact encoded length without producing output.
@@ -662,6 +663,7 @@ pub fn Backend(comptime Wire: type) type {
             v: T,
             w: *std.Io.Writer,
             comptime parent: core.TypeOptions,
+            canonical: bool,
         ) std.Io.Writer.Error!void {
             switch (@typeInfo(T)) {
                 .bool => try Wire.writeBool(w, v),
@@ -669,7 +671,7 @@ pub fn Backend(comptime Wire: type) type {
                 .float, .comptime_float => try Wire.writeFloat(w, v),
                 .optional => |o| {
                     if (v) |payload| {
-                        try encodeAny(o.child, payload, w, parent);
+                        try encodeAny(o.child, payload, w, parent, canonical);
                     } else {
                         try Wire.writeNull(w);
                     }
@@ -687,26 +689,39 @@ pub fn Backend(comptime Wire: type) type {
                         try Wire.writeBin(w, v);
                     } else {
                         try Wire.writeArrayHeader(w, v.len);
-                        for (v) |item| try encodeAny(p.child, item, w, parent);
+                        for (v) |item| try encodeAny(p.child, item, w, parent, canonical);
                     }
                 },
-                .@"struct" => try encodeStruct(T, v, w),
-                .@"union" => try encodeUnion(T, v, w),
+                .@"struct" => try encodeStruct(T, v, w, canonical),
+                .@"union" => try encodeUnion(T, v, w, canonical),
                 else => @compileError("serval binary backend: unsupported type " ++ @typeName(T)),
             }
         }
 
-        fn encodeStruct(comptime T: type, v: T, w: *std.Io.Writer) std.Io.Writer.Error!void {
+        fn encodeStruct(comptime T: type, v: T, w: *std.Io.Writer, canonical: bool) std.Io.Writer.Error!void {
             const S = core.schemaOf(T);
             const struct_fields = @typeInfo(T).@"struct".fields;
             try Wire.writeMapHeader(w, struct_fields.len);
-            inline for (S.fields, struct_fields) |sf, zf| {
-                try Wire.writeStr(w, sf.wire_name);
-                try encodeAny(zf.type, @field(v, zf.name), w, S.options);
+            if (canonical) {
+                // serval-sj2: comptime-sorted key order per wire format.
+                const wire_names = comptime blk: {
+                    var names: [S.fields.len][]const u8 = undefined;
+                    for (S.fields, 0..) |sf, i| names[i] = sf.wire_name;
+                    break :blk names;
+                };
+                inline for (comptime contract.sortedKeyIndices(&wire_names, Wire.canonical_key_order)) |fi| {
+                    try Wire.writeStr(w, S.fields[fi].wire_name);
+                    try encodeAny(struct_fields[fi].type, @field(v, struct_fields[fi].name), w, S.options, canonical);
+                }
+            } else {
+                inline for (S.fields, struct_fields) |sf, zf| {
+                    try Wire.writeStr(w, sf.wire_name);
+                    try encodeAny(zf.type, @field(v, zf.name), w, S.options, canonical);
+                }
             }
         }
 
-        fn encodeUnion(comptime T: type, v: T, w: *std.Io.Writer) std.Io.Writer.Error!void {
+        fn encodeUnion(comptime T: type, v: T, w: *std.Io.Writer, canonical: bool) std.Io.Writer.Error!void {
             const info = @typeInfo(T).@"union";
             if (info.tag_type == null)
                 @compileError("serval binary backend: untagged Zig unions unsupported: " ++ @typeName(T));
@@ -720,7 +735,7 @@ pub fn Backend(comptime Wire: type) type {
                         } else {
                             try Wire.writeMapHeader(w, 1);
                             try Wire.writeStr(w, wire);
-                            try encodeAny(@TypeOf(payload), payload, w, .{});
+                            try encodeAny(@TypeOf(payload), payload, w, .{}, canonical);
                         }
                     },
                 },
@@ -728,12 +743,21 @@ pub fn Backend(comptime Wire: type) type {
                     inline else => |payload, tag| {
                         const wire = comptime core.naming.convert(opts.rename_all, @tagName(tag));
                         const has_content = @TypeOf(payload) != void;
+                        // serval-sj2
+                        const content_first = comptime contract.keyLess(Wire.canonical_key_order, opts.union_content_field, opts.union_tag_field);
                         try Wire.writeMapHeader(w, if (has_content) 2 else 1);
-                        try Wire.writeStr(w, opts.union_tag_field);
-                        try Wire.writeStr(w, wire);
-                        if (has_content) {
+                        if (canonical and has_content and content_first) {
                             try Wire.writeStr(w, opts.union_content_field);
-                            try encodeAny(@TypeOf(payload), payload, w, .{});
+                            try encodeAny(@TypeOf(payload), payload, w, .{}, canonical);
+                            try Wire.writeStr(w, opts.union_tag_field);
+                            try Wire.writeStr(w, wire);
+                        } else {
+                            try Wire.writeStr(w, opts.union_tag_field);
+                            try Wire.writeStr(w, wire);
+                            if (has_content) {
+                                try Wire.writeStr(w, opts.union_content_field);
+                                try encodeAny(@TypeOf(payload), payload, w, .{}, canonical);
+                            }
                         }
                     },
                 },
@@ -751,11 +775,30 @@ pub fn Backend(comptime Wire: type) type {
                             const PS = core.schemaOf(P);
                             const pfields = @typeInfo(P).@"struct".fields;
                             try Wire.writeMapHeader(w, 1 + pfields.len);
-                            try Wire.writeStr(w, opts.union_tag_field);
-                            try Wire.writeStr(w, wire);
-                            inline for (PS.fields, pfields) |sf, zf| {
-                                try Wire.writeStr(w, sf.wire_name);
-                                try encodeAny(zf.type, @field(payload, zf.name), w, PS.options);
+                            if (canonical) {
+                                // serval-sj2: tag key sorted among payload keys.
+                                const keys = comptime blk: {
+                                    var arr: [1 + PS.fields.len][]const u8 = undefined;
+                                    arr[0] = opts.union_tag_field;
+                                    for (PS.fields, 0..) |sf, i| arr[1 + i] = sf.wire_name;
+                                    break :blk arr;
+                                };
+                                inline for (comptime contract.sortedKeyIndices(&keys, Wire.canonical_key_order)) |ki| {
+                                    if (ki == 0) {
+                                        try Wire.writeStr(w, opts.union_tag_field);
+                                        try Wire.writeStr(w, wire);
+                                    } else {
+                                        try Wire.writeStr(w, PS.fields[ki - 1].wire_name);
+                                        try encodeAny(pfields[ki - 1].type, @field(payload, pfields[ki - 1].name), w, PS.options, canonical);
+                                    }
+                                }
+                            } else {
+                                try Wire.writeStr(w, opts.union_tag_field);
+                                try Wire.writeStr(w, wire);
+                                inline for (PS.fields, pfields) |sf, zf| {
+                                    try Wire.writeStr(w, sf.wire_name);
+                                    try encodeAny(zf.type, @field(payload, zf.name), w, PS.options, canonical);
+                                }
                             }
                         }
                     },
@@ -765,7 +808,7 @@ pub fn Backend(comptime Wire: type) type {
                         if (@TypeOf(payload) == void) {
                             try Wire.writeNull(w);
                         } else {
-                            try encodeAny(@TypeOf(payload), payload, w, .{});
+                            try encodeAny(@TypeOf(payload), payload, w, .{}, canonical);
                         }
                     },
                 },

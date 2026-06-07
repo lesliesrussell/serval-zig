@@ -25,4 +25,8 @@ pub const DecodeOptions = struct {
 
 pub const EncodeOptions = struct {
     pretty: bool = false,
+    // serval-sj2: deterministic output — map keys in canonical order per
+    // wire format, minified. Floats stay fixed-width (documented
+    // deviation from RFC 8949 §4.2.2 shortest-form).
+    canonical: bool = false,
 };

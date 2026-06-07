@@ -13,6 +13,10 @@ const Writer = std.Io.Writer;
 /// Major 7, simple value 22.
 pub const null_byte: u8 = 0xf6;
 
+// serval-sj2: RFC 8949 §4.2.1 — bytewise order of encoded keys is
+// length-first for definite text strings.
+pub const canonical_key_order: codec.KeyOrder = .length_first;
+
 /// Argument value for a major type (RFC 8949 §3). Rejects reserved
 /// additional-info values 28-30 and indefinite lengths (31).
 fn readArg(d: anytype, ai: u5) core.DecodeError!u64 {

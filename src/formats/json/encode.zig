@@ -32,9 +32,15 @@ pub fn encodeToWriter(
     options: codec.EncodeOptions,
     writer: *std.Io.Writer,
 ) std.Io.Writer.Error!void {
-    var enc = Encoder{ .writer = writer, .options = options };
+    var opts = options;
+    // serval-sj2: canonical implies minified.
+    if (opts.canonical) opts.pretty = false;
+    var enc = Encoder{ .writer = writer, .options = opts };
     try encodeAny(T, value, &enc, .{});
 }
+
+// serval-sj2
+const key_order: codec.KeyOrder = .lexicographic;
 
 // serval-x09
 /// Exact encoded length without producing output.
@@ -99,14 +105,28 @@ fn encodeStruct(comptime T: type, v: T, e: *Encoder) WriteError!void {
     const struct_fields = @typeInfo(T).@"struct".fields;
     try e.writer.writeByte('{');
     e.depth += 1;
-    inline for (S.fields, struct_fields, 0..) |sf, zf, i| {
-        if (i != 0) try e.writer.writeByte(',');
-        try newlineIndent(e);
-        try fieldKey(sf.wire_name, e);
-        try encodeAny(zf.type, @field(v, zf.name), e, S.options);
+    if (e.options.canonical) {
+        // serval-sj2: comptime-sorted key order.
+        const wire_names = comptime blk: {
+            var names: [S.fields.len][]const u8 = undefined;
+            for (S.fields, 0..) |sf, i| names[i] = sf.wire_name;
+            break :blk names;
+        };
+        inline for (comptime codec.sortedKeyIndices(&wire_names, key_order), 0..) |fi, pos| {
+            if (pos != 0) try e.writer.writeByte(',');
+            try fieldKey(S.fields[fi].wire_name, e);
+            try encodeAny(struct_fields[fi].type, @field(v, struct_fields[fi].name), e, S.options);
+        }
+    } else {
+        inline for (S.fields, struct_fields, 0..) |sf, zf, i| {
+            if (i != 0) try e.writer.writeByte(',');
+            try newlineIndent(e);
+            try fieldKey(sf.wire_name, e);
+            try encodeAny(zf.type, @field(v, zf.name), e, S.options);
+        }
     }
     e.depth -= 1;
-    if (struct_fields.len != 0) try newlineIndent(e);
+    if (!e.options.canonical and struct_fields.len != 0) try newlineIndent(e);
     try e.writer.writeByte('}');
 }
 
@@ -156,19 +176,31 @@ fn encodeUnion(comptime T: type, v: T, e: *Encoder) WriteError!void {
         .adjacent => switch (v) {
             inline else => |payload, tag| {
                 const wire = comptime core.naming.convert(opts.rename_all, @tagName(tag));
+                const has_content = @TypeOf(payload) != void;
+                // serval-sj2: under canonical, the content key may sort
+                // before the tag key.
+                const content_first = comptime codec.codec.keyLess(key_order, opts.union_content_field, opts.union_tag_field);
                 try e.writer.writeByte('{');
                 e.depth += 1;
-                try newlineIndent(e);
-                try fieldKey(opts.union_tag_field, e);
-                try std.json.Stringify.encodeJsonString(wire, .{}, e.writer);
-                if (@TypeOf(payload) != void) {
-                    try e.writer.writeByte(',');
-                    try newlineIndent(e);
+                if (e.options.canonical and has_content and content_first) {
                     try fieldKey(opts.union_content_field, e);
                     try encodeAny(@TypeOf(payload), payload, e, .{});
+                    try e.writer.writeByte(',');
+                    try fieldKey(opts.union_tag_field, e);
+                    try std.json.Stringify.encodeJsonString(wire, .{}, e.writer);
+                } else {
+                    try newlineIndent(e);
+                    try fieldKey(opts.union_tag_field, e);
+                    try std.json.Stringify.encodeJsonString(wire, .{}, e.writer);
+                    if (has_content) {
+                        try e.writer.writeByte(',');
+                        try newlineIndent(e);
+                        try fieldKey(opts.union_content_field, e);
+                        try encodeAny(@TypeOf(payload), payload, e, .{});
+                    }
                 }
                 e.depth -= 1;
-                try newlineIndent(e);
+                if (!e.options.canonical) try newlineIndent(e);
                 try e.writer.writeByte('}');
             },
         },
@@ -179,23 +211,47 @@ fn encodeUnion(comptime T: type, v: T, e: *Encoder) WriteError!void {
                 const P = @TypeOf(payload);
                 try e.writer.writeByte('{');
                 e.depth += 1;
-                try newlineIndent(e);
-                try fieldKey(opts.union_tag_field, e);
-                try std.json.Stringify.encodeJsonString(wire, .{}, e.writer);
-                if (P != void) {
+                if (P == void) {
+                    if (!e.options.canonical) try newlineIndent(e);
+                    try fieldKey(opts.union_tag_field, e);
+                    try std.json.Stringify.encodeJsonString(wire, .{}, e.writer);
+                } else {
                     if (@typeInfo(P) != .@"struct")
                         @compileError("serval-json: internal union tagging requires struct or void payloads: " ++ @typeName(T));
                     const PS = core.schemaOf(P);
                     const pfields = @typeInfo(P).@"struct".fields;
-                    inline for (PS.fields, pfields) |sf, zf| {
-                        try e.writer.writeByte(',');
+                    if (e.options.canonical) {
+                        // serval-sj2: tag key sorted among payload keys.
+                        const keys = comptime blk: {
+                            var arr: [1 + PS.fields.len][]const u8 = undefined;
+                            arr[0] = opts.union_tag_field;
+                            for (PS.fields, 0..) |sf, i| arr[1 + i] = sf.wire_name;
+                            break :blk arr;
+                        };
+                        inline for (comptime codec.sortedKeyIndices(&keys, key_order), 0..) |ki, pos| {
+                            if (pos != 0) try e.writer.writeByte(',');
+                            if (ki == 0) {
+                                try fieldKey(opts.union_tag_field, e);
+                                try std.json.Stringify.encodeJsonString(wire, .{}, e.writer);
+                            } else {
+                                try fieldKey(PS.fields[ki - 1].wire_name, e);
+                                try encodeAny(pfields[ki - 1].type, @field(payload, pfields[ki - 1].name), e, PS.options);
+                            }
+                        }
+                    } else {
                         try newlineIndent(e);
-                        try fieldKey(sf.wire_name, e);
-                        try encodeAny(zf.type, @field(payload, zf.name), e, PS.options);
+                        try fieldKey(opts.union_tag_field, e);
+                        try std.json.Stringify.encodeJsonString(wire, .{}, e.writer);
+                        inline for (PS.fields, pfields) |sf, zf| {
+                            try e.writer.writeByte(',');
+                            try newlineIndent(e);
+                            try fieldKey(sf.wire_name, e);
+                            try encodeAny(zf.type, @field(payload, zf.name), e, PS.options);
+                        }
                     }
                 }
                 e.depth -= 1;
-                try newlineIndent(e);
+                if (!e.options.canonical) try newlineIndent(e);
                 try e.writer.writeByte('}');
             },
         },

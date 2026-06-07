@@ -11,6 +11,9 @@ const Writer = std.Io.Writer;
 
 pub const null_byte: u8 = 0xc0;
 
+// serval-sj2
+pub const canonical_key_order: codec.KeyOrder = .lexicographic;
+
 pub fn readHeader(d: anytype) core.DecodeError!Header {
     const b = try d.readByte();
     return switch (b) {

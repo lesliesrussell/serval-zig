@@ -6,6 +6,49 @@
 
 const options = @import("options.zig");
 
+// serval-sj2
+const std = @import("std");
+
+/// Canonical map-key ordering per wire format.
+pub const KeyOrder = enum {
+    /// Byte-lexicographic over key content (JSON — note: not full JCS,
+    /// which sorts UTF-16 code units; msgpack).
+    lexicographic,
+    /// Shorter keys first, then bytes — RFC 8949 §4.2.1 bytewise order of
+    /// the encoded form, for definite-length text keys (CBOR).
+    length_first,
+};
+
+// serval-sj2
+pub fn keyLess(comptime order: KeyOrder, a: []const u8, b: []const u8) bool {
+    switch (order) {
+        .lexicographic => return std.mem.lessThan(u8, a, b),
+        .length_first => {
+            if (a.len != b.len) return a.len < b.len;
+            return std.mem.lessThan(u8, a, b);
+        },
+    }
+}
+
+// serval-sj2
+/// Comptime index permutation putting `names` in canonical order.
+pub fn sortedKeyIndices(comptime names: []const []const u8, comptime order: KeyOrder) [names.len]usize {
+    comptime {
+        var idx: [names.len]usize = undefined;
+        for (0..names.len) |i| idx[i] = i;
+        var i: usize = 1;
+        while (i < names.len) : (i += 1) {
+            var j = i;
+            while (j > 0 and keyLess(order, names[idx[j]], names[idx[j - 1]])) : (j -= 1) {
+                const t = idx[j];
+                idx[j] = idx[j - 1];
+                idx[j - 1] = t;
+            }
+        }
+        return idx;
+    }
+}
+
 // serval-xx5
 /// How a backend supports one union tagging mode.
 pub const UnionModeSupport = enum {

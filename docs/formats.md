@@ -48,3 +48,14 @@ Declared on the union via `pub const serval = .{ .union_tagging = ... }`:
 | `.adjacent` | `{"t": "variant", "c": payload}` | Keys via `union_tag_field`/`union_content_field`; tag must precede content; streaming decode |
 | `.internal` | `{"kind": "variant", ...payload fields}` | Struct/void payloads only; tag position independent (buffered decode) |
 | `.untagged` | payload bare | Variants tried in declaration order — order most→least specific; or set `untagged_policy = .unambiguous` to error (AmbiguousUnion) when >1 variant matches; buffered decode |
+
+## Canonical encoding
+
+`EncodeOptions.canonical` produces deterministic, byte-identical output
+for hashing and content-addressing. Map keys (struct fields and union
+wrapper maps, including internal tag splicing) emit in canonical order:
+byte-lexicographic for JSON (note: not full JCS, which sorts UTF-16 code
+units) and MessagePack; length-first-then-bytes for CBOR per RFC 8949
+§4.2.1 (bytewise order of the encoded key). Canonical implies minified.
+Deviation from §4.2.2: floats stay fixed-width (f32/f64), not
+shortest-form. Decode is unaffected. ZON has no canonical mode.
