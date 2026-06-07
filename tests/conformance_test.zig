@@ -470,6 +470,59 @@ test "extensions: msgpack ext rejects by default, surfaces as bytes under .skip"
     try std.testing.expectEqualSlices(u8, &.{ 0xde, 0xad, 0xbe, 0xef }, dyn.object[0].value.bytes);
 }
 
+// --- The invariant test (serval-nf3) ---------------------------------------
+// One pattern guarding cross-backend consistency, canonicalization, and
+// validation semantics together.
+
+test "invariant: decode equality + canonical stability + identical issue codes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const T = struct {
+        user_id: u64,
+        name: []const u8,
+        age: ?u8 = null,
+        tags: []const i64 = &.{},
+        nested: struct { level: enum { low, high } = .low } = .{},
+
+        pub const serval = .{
+            .rename_all = .camel_case,
+            .fields = .{
+                .name = .{ .min_len = 2 },
+                .tags = .{ .max_items = 3 },
+            },
+        };
+    };
+    const v = T{ .user_id = 9, .name = "ada", .age = 30, .tags = &.{ 1, -2 }, .nested = .{ .level = .high } };
+
+    // (a) every backend decodes the same T; (b) canonical re-encode is
+    // byte-stable and re-decodes to the same T.
+    inline for (full_backends) |B| {
+        const c1 = try B.encodeAlloc(T, a, v, .{ .canonical = true });
+        const d1 = try B.decode(T, a, c1, .{});
+        try std.testing.expectEqualDeep(v, d1);
+        const c2 = try B.encodeAlloc(T, a, d1, .{ .canonical = true });
+        try std.testing.expectEqualSlices(u8, c1, c2);
+        try std.testing.expectEqualDeep(v, try B.decode(T, a, c2, .{}));
+    }
+
+    // (c) an invalid value classifies identically everywhere: same issue
+    // codes, same paths, same order.
+    const bad = T{ .user_id = 9, .name = "x", .tags = &.{ 1, 2, 3, 4 } };
+    const ref = try serval.json.decodeResult(T, a, try serval.json.encodeAlloc(T, a, bad, .{ .canonical = true }), .{});
+    try std.testing.expect(ref == .invalid);
+    try std.testing.expectEqual(@as(usize, 2), ref.invalid.issues.len);
+    inline for (.{ serval.msgpack, serval.cbor }) |B| {
+        const dr = try B.decodeResult(T, a, try B.encodeAlloc(T, a, bad, .{ .canonical = true }), .{});
+        try std.testing.expectEqual(ref.invalid.issues.len, dr.invalid.issues.len);
+        for (ref.invalid.issues, dr.invalid.issues) |ri, di| {
+            try std.testing.expectEqual(ri.code, di.code);
+            try std.testing.expectEqualStrings(ri.path.segments[0].field, di.path.segments[0].field);
+        }
+    }
+}
+
 // --- Declared gaps stay declared -----------------------------------------
 
 test "conformance: zon's shape-error folding is the documented gap, not silent drift" {
