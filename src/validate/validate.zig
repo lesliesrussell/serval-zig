@@ -46,9 +46,31 @@ pub fn check(
 
 // serval-sru
 fn checkStructValue(comptime T: type, value: *const T, ctx: *core.ValidateContext) void {
+    if (@typeInfo(T) != .@"struct") {
+        // Non-struct top-level values (e.g. unions) only run their hook.
+        if (@hasDecl(T, "servalValidate")) T.servalValidate(ctx, value);
+        return;
+    }
     const S = core.schemaOf(T);
-    inline for (S.fields) |f| {
+    const struct_fields = @typeInfo(T).@"struct".fields;
+    inline for (S.fields, struct_fields) |f, zf| {
         checkValue(f, @field(value.*, f.name), ctx);
+        // serval-bmf: per-field custom validator, invoked with the field
+        // segment pushed so its .root-leaf issues land on the field.
+        if (comptime core.schema.fieldValidator(T, f.name)) |V| {
+            comptime {
+                const info = @typeInfo(@TypeOf(V.f));
+                if (info != .@"fn" or info.@"fn".params.len != 2 or
+                    info.@"fn".params[1].type != *const zf.type)
+                {
+                    @compileError("serval: .validator on " ++ @typeName(T) ++ "." ++ f.name ++
+                        " must be fn (*ValidateContext, *const " ++ @typeName(zf.type) ++ ") void");
+                }
+            }
+            ctx.pushPath(.{ .field = f.name });
+            defer ctx.popPath();
+            V.f(ctx, &@field(value.*, f.name));
+        }
     }
     if (@hasDecl(T, "servalValidate")) {
         T.servalValidate(ctx, value);

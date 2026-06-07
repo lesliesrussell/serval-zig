@@ -547,6 +547,65 @@ test "pattern: full-match option" {
     try std.testing.expect(report.ok());
 }
 
+// serval-bmf
+fn noShouting(ctx: *serval.core.ValidateContext, name: *const []const u8) void {
+    for (name.*) |c| {
+        if (std.ascii.isLower(c)) return;
+    }
+    if (name.len > 0) ctx.issue(.{ .path = .root, .code = .custom, .message = "no shouting" });
+}
+
+const Polite = struct {
+    name: []const u8 = "ok",
+
+    pub const serval = .{
+        .fields = .{ .name = .{ .min_len = 1, .validator = noShouting } },
+    };
+};
+
+test "field validator: invoked alongside built-in rules with field path" {
+    const loud = Polite{ .name = "HEY" };
+    var report = try checkAlloc(Polite, &loud);
+    try std.testing.expectEqual(@as(usize, 1), report.issues.len);
+    try std.testing.expectEqual(serval.core.IssueCode.custom, report.issues[0].code);
+    try std.testing.expectEqualStrings("name", report.issues[0].path.segments[0].field);
+    report.deinit(std.testing.allocator);
+
+    const fine = Polite{ .name = "Hey" };
+    report = try checkAlloc(Polite, &fine);
+    defer report.deinit(std.testing.allocator);
+    try std.testing.expect(report.ok());
+}
+
+test "field validator: runs in nested structs with full paths" {
+    const Outer = struct { who: Polite = .{} };
+    const v = Outer{ .who = .{ .name = "LOUD" } };
+    const report = try checkAlloc(Outer, &v);
+    defer report.deinit(std.testing.allocator);
+    const segs = report.issues[0].path.segments;
+    try std.testing.expectEqual(@as(usize, 2), segs.len);
+    try std.testing.expectEqualStrings("who", segs[0].field);
+    try std.testing.expectEqualStrings("name", segs[1].field);
+}
+
+test "field validator: decode path sees the transformed value" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const T = struct {
+        name: []const u8,
+
+        pub const serval = .{
+            .fields = .{ .name = .{ .trim = true, .lowercase = true, .validator = noShouting } },
+        };
+    };
+    // raw "  HEY  " would fail; lowercase transform runs first.
+    const v = try serval.json.decode(T, arena.allocator(),
+        \\{"name":"  HEY  "}
+    , .{});
+    try std.testing.expectEqualStrings("hey", v.name);
+}
+
 // serval-bfp
 const Minor = struct {
     age: u8,

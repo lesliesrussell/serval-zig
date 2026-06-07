@@ -118,10 +118,33 @@ fn coerceInto(comptime Target: type, comptime src: anytype, comptime Owner: type
     comptime {
         var out: Target = .{};
         for (@typeInfo(@TypeOf(src)).@"struct".fields) |f| {
+            // serval-bmf: .validator is a comptime function value — it
+            // can't live in the runtime FieldMeta struct; the validation
+            // engine reads it straight from the metadata declaration.
+            if (std.mem.eql(u8, f.name, "validator")) continue;
             if (!@hasField(Target, f.name))
                 @compileError("unknown serval field rule '." ++ f.name ++ "' on " ++ @typeName(Owner));
             @field(out, f.name) = @field(src, f.name);
         }
         return out;
+    }
+}
+
+// serval-bmf
+/// The field's custom validator type from `pub const serval` metadata, or
+/// null. Comptime-checked: must be `fn (*ValidateContext, *const FT) void`
+/// (ValidateContext checked structurally by the call site).
+pub fn fieldValidator(comptime T: type, comptime field_name: []const u8) ?type {
+    comptime {
+        if (@typeInfo(T) != .@"struct") return null;
+        if (!@hasDecl(T, "serval")) return null;
+        const m = T.serval;
+        if (!@hasField(@TypeOf(m), "fields")) return null;
+        if (!@hasField(@TypeOf(m.fields), field_name)) return null;
+        const fm = @field(m.fields, field_name);
+        if (!@hasField(@TypeOf(fm), "validator")) return null;
+        return struct {
+            pub const f = @field(fm, "validator");
+        };
     }
 }

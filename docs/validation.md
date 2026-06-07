@@ -10,6 +10,7 @@
   patterns are compile errors; search semantics, anchor with `^...$` for
   full match), `email`, `url`, `one_of_str`, `nonempty`
 - **Collection**: `min_items`, `max_items`, `unique`, `nonempty`
+- **Per-field custom**: `.validator = myFn` in field metadata — `fn (*ValidateContext, *const FieldType) void`, comptime type-checked; sees transformed values on decode; issues land on the field path; typed paths only (not valueAgainstSchema)
 - **Cross-field**: `pub fn servalValidate(ctx, self)` hook on the struct
 - **Transforms** (decode-time, before constraints): `trim` (allocation-free sub-slice), `lowercase` (allocates with the value allocator, even in borrowed mode). Typed check() and valueAgainstSchema see values as-is.
 
