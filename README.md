@@ -82,8 +82,8 @@ See `docs/architecture.md` for the design.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). The vendored mvzr dependency is also MIT
-(license included under zig-pkg/).
+MIT — see [LICENSE](LICENSE). The mvzr dependency (fetched by pinned
+hash via build.zig.zon) is also MIT.
 
 ## Build
 
