@@ -947,6 +947,55 @@ test "transforms: apply on buffered union payloads (fromValue path)" {
     try std.testing.expectEqualStrings("ada", c.login.user);
 }
 
+// serval-tsm
+const Overlap = union(enum) {
+    count: i64,
+    ratio: f64,
+    words: []const u8,
+
+    pub const serval = .{ .union_tagging = .untagged, .untagged_policy = .unambiguous };
+};
+
+test "untagged .unambiguous: multi-variant match is an error" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    // 42 matches both i64 and f64 (ints feed float fields) — ambiguous.
+    const result = serval.json.decode(Overlap, arena.allocator(), "42", .{});
+    try std.testing.expectError(error.AmbiguousUnion, result);
+}
+
+test "untagged .unambiguous: single-variant matches still decode" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const f = try serval.json.decode(Overlap, a, "1.5", .{});
+    try std.testing.expectEqual(@as(f64, 1.5), f.ratio);
+
+    const w = try serval.json.decode(Overlap, a,
+        \\"hi"
+    , .{});
+    try std.testing.expectEqualStrings("hi", w.words);
+
+    // no variant matches at all
+    try std.testing.expectError(error.InvalidEnumTag, serval.json.decode(Overlap, a, "true", .{}));
+}
+
+test "untagged default .first_match: declaration order wins on overlap" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const FirstWins = union(enum) {
+        count: i64,
+        ratio: f64,
+
+        pub const serval = .{ .union_tagging = .untagged };
+    };
+    const v = try serval.json.decode(FirstWins, arena.allocator(), "42", .{});
+    try std.testing.expectEqual(@as(i64, 42), v.count);
+}
+
 test "json roundtrip" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

@@ -28,6 +28,8 @@ pub const TypeOptions = struct {
     /// Key names for .adjacent (and future .internal) union tagging.
     union_tag_field: []const u8 = "type",
     union_content_field: []const u8 = "content",
+    // serval-tsm
+    untagged_policy: attributes.UntaggedPolicy = .first_match,
 };
 
 pub fn Schema(comptime T: type) type {

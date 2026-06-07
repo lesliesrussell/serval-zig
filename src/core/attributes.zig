@@ -27,3 +27,13 @@ pub const UnionTagging = enum {
     adjacent,
     untagged,
 };
+
+// serval-tsm
+/// How untagged unions resolve when input could match several variants.
+pub const UntaggedPolicy = enum {
+    /// Declaration order wins (default) — order variants most→least
+    /// specific.
+    first_match,
+    /// Try every variant; more than one match is error.AmbiguousUnion.
+    unambiguous,
+};

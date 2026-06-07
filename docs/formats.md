@@ -47,4 +47,4 @@ Declared on the union via `pub const serval = .{ .union_tagging = ... }`:
 | `.external` (default) | `{"variant": payload}`; unit variants are bare strings | Streaming decode |
 | `.adjacent` | `{"t": "variant", "c": payload}` | Keys via `union_tag_field`/`union_content_field`; tag must precede content; streaming decode |
 | `.internal` | `{"kind": "variant", ...payload fields}` | Struct/void payloads only; tag position independent (buffered decode) |
-| `.untagged` | payload bare | Variants tried in declaration order — order most→least specific; buffered decode |
+| `.untagged` | payload bare | Variants tried in declaration order — order most→least specific; or set `untagged_policy = .unambiguous` to error (AmbiguousUnion) when >1 variant matches; buffered decode |

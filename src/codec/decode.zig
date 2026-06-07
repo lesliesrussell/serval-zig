@@ -269,21 +269,49 @@ fn fromValueUnion(
             }
             return error.InvalidEnumTag;
         },
-        // First variant (declaration order) that maps wins — order types
-        // from most to least specific.
-        .untagged => {
-            inline for (info.fields) |f| {
-                if (f.type == void) {
-                    if (v == .null) return @unionInit(T, f.name, {});
-                } else {
-                    const attempt: ?f.type = fromValueOpts(f.type, allocator, v, .{}, mode) catch |err| switch (err) {
-                        error.OutOfMemory => return error.OutOfMemory,
-                        else => null,
-                    };
-                    if (attempt) |payload| return @unionInit(T, f.name, payload);
+        .untagged => switch (comptime opts.untagged_policy) {
+            // First variant (declaration order) that maps wins — order
+            // types from most to least specific.
+            .first_match => {
+                inline for (info.fields) |f| {
+                    if (f.type == void) {
+                        if (v == .null) return @unionInit(T, f.name, {});
+                    } else {
+                        const attempt: ?f.type = fromValueOpts(f.type, allocator, v, .{}, mode) catch |err| switch (err) {
+                            error.OutOfMemory => return error.OutOfMemory,
+                            else => null,
+                        };
+                        if (attempt) |payload| return @unionInit(T, f.name, payload);
+                    }
                 }
-            }
-            return error.InvalidEnumTag;
+                return error.InvalidEnumTag;
+            },
+            // serval-tsm: every variant is tried; >1 match is ambiguity.
+            // Trial decodes allocate garbage per attempt — arena
+            // recommended (same caveat as buffered unions generally).
+            .unambiguous => {
+                var result: ?T = null;
+                var matches: usize = 0;
+                inline for (info.fields) |f| {
+                    if (f.type == void) {
+                        if (v == .null) {
+                            matches += 1;
+                            if (result == null) result = @unionInit(T, f.name, {});
+                        }
+                    } else {
+                        const attempt: ?f.type = fromValueOpts(f.type, allocator, v, .{}, mode) catch |err| switch (err) {
+                            error.OutOfMemory => return error.OutOfMemory,
+                            else => null,
+                        };
+                        if (attempt) |payload| {
+                            matches += 1;
+                            if (result == null) result = @unionInit(T, f.name, payload);
+                        }
+                    }
+                }
+                if (matches > 1) return error.AmbiguousUnion;
+                return result orelse error.InvalidEnumTag;
+            },
         },
     }
 }

@@ -99,4 +99,7 @@ pub const DecodeError = error{
     InvalidEnumTag,
     // serval-x09: streaming source failed mid-decode.
     ReadFailed,
+    // serval-tsm: untagged union input matched >1 variant under the
+    // .unambiguous policy.
+    AmbiguousUnion,
 };
