@@ -125,6 +125,55 @@ pub fn build(b: *std.Build) void {
         test_step.dependOn(&b.addRunArtifact(t).step);
     }
 
+    // serval-wtv: dedicated ReleaseFast module graph so `zig build bench`
+    // measures optimized code regardless of -Doptimize.
+    {
+        const fast: std.builtin.OptimizeMode = .ReleaseFast;
+        const core_f = b.createModule(.{ .root_source_file = b.path("src/core/root.zig"), .target = target, .optimize = fast });
+        const validate_f = b.createModule(.{ .root_source_file = b.path("src/validate/root.zig"), .target = target, .optimize = fast });
+        validate_f.addImport("serval-core", core_f);
+        validate_f.addImport("mvzr", mvzr_dep.module("mvzr"));
+        const codec_f = b.createModule(.{ .root_source_file = b.path("src/codec/root.zig"), .target = target, .optimize = fast });
+        codec_f.addImport("serval-core", core_f);
+        codec_f.addImport("serval-validate", validate_f);
+        const json_f = b.createModule(.{ .root_source_file = b.path("src/formats/json/root.zig"), .target = target, .optimize = fast });
+        json_f.addImport("serval-core", core_f);
+        json_f.addImport("serval-codec", codec_f);
+        json_f.addImport("serval-validate", validate_f);
+        const zon_f = b.createModule(.{ .root_source_file = b.path("src/formats/zon/root.zig"), .target = target, .optimize = fast });
+        zon_f.addImport("serval-core", core_f);
+        zon_f.addImport("serval-codec", codec_f);
+        zon_f.addImport("serval-validate", validate_f);
+        const msgpack_f = b.createModule(.{ .root_source_file = b.path("src/formats/msgpack/root.zig"), .target = target, .optimize = fast });
+        msgpack_f.addImport("serval-core", core_f);
+        msgpack_f.addImport("serval-codec", codec_f);
+        msgpack_f.addImport("serval-validate", validate_f);
+        const cbor_f = b.createModule(.{ .root_source_file = b.path("src/formats/cbor/root.zig"), .target = target, .optimize = fast });
+        cbor_f.addImport("serval-core", core_f);
+        cbor_f.addImport("serval-codec", codec_f);
+        cbor_f.addImport("serval-validate", validate_f);
+        const umbrella_f = b.createModule(.{ .root_source_file = b.path("src/serval.zig"), .target = target, .optimize = fast });
+        umbrella_f.addImport("serval-core", core_f);
+        umbrella_f.addImport("serval-validate", validate_f);
+        umbrella_f.addImport("serval-codec", codec_f);
+        umbrella_f.addImport("serval-json", json_f);
+        umbrella_f.addImport("serval-zon", zon_f);
+        umbrella_f.addImport("serval-msgpack", msgpack_f);
+        umbrella_f.addImport("serval-cbor", cbor_f);
+
+        const bench_exe = b.addExecutable(.{
+            .name = "bench",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("bench/main.zig"),
+                .target = target,
+                .optimize = fast,
+                .imports = &.{.{ .name = "serval", .module = umbrella_f }},
+            }),
+        });
+        const bench_step = b.step("bench", "Run microbenchmarks (always ReleaseFast)");
+        bench_step.dependOn(&b.addRunArtifact(bench_exe).step);
+    }
+
     // Examples
     const examples_step = b.step("examples", "Build examples");
     const examples = [_]struct { name: []const u8, path: []const u8 }{
