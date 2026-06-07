@@ -5,7 +5,7 @@
 - **Scalar**: `min`, `max`, `gt`, `lt` — applied to ints and floats (float
   bounds are integral-valued; use a custom validator for fractional
   limits); `one_of` — int membership (ints only)
-- **String**: `min_len`, `max_len`, `pattern` (regex via
+- **String**: `min_len`, `max_len`, `pattern` + `pattern_full` (regex via
   [mvzr](https://github.com/mnemnion/mvzr), compiled at comptime — invalid
   patterns are compile errors; search semantics, anchor with `^...$` for
   full match), `email`, `url`, `one_of_str`, `nonempty`

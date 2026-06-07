@@ -79,15 +79,16 @@ Edge semantics (all pinned):
 
 Wherever serval compares values (`.unique`, future canonical checks):
 
-- Current implementation is `std.meta.eql` — **field-wise for structs,
-  `==` for scalars, pointer identity for slices**. The slice behavior is
-  a known defect for `.unique` (serval-m9b replaces it with deep
-  equality: strings/bytes by content).
+- Equality is `validate.deepEql` (serval-m9b): scalars/enums/bools by
+  `==`, slices element-wise **by content**, structs field-wise,
+  optionals/unions structurally.
 - Float equality is `==`: `NaN ≠ NaN` (a NaN never counts as a
   duplicate), `-0.0 == 0.0` (they do). This is frozen unless D-future
   revisits bitwise comparison.
-- `.unique` on the dynamic path stays unimplemented until the deep-eql
-  definition lands.
+- `.unique` on the dynamic path uses the same definition over `Value` —
+  variant-strict, so `.int 1` and `.float 1.0` are not duplicates.
+- `.pattern` defaults to search semantics; `.pattern_full = true` requires
+  the match to span the entire string.
 
 ## 6. Presence
 

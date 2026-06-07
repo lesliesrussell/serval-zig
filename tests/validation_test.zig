@@ -446,6 +446,107 @@ test "nested paths: dynamic walker carries nested paths" {
     try std.testing.expectEqualStrings("zip", segs[1].field);
 }
 
+// serval-m9b
+test "unique: duplicate strings caught by content, not pointer identity" {
+    const T = struct {
+        tags: []const []const u8 = &.{},
+
+        pub const serval = .{ .fields = .{ .tags = .{ .unique = true } } };
+    };
+    // Distinct allocations, identical content — must be a duplicate.
+    var a = [_]u8{ 'd', 'u', 'p' };
+    var b = [_]u8{ 'd', 'u', 'p' };
+    const v = T{ .tags = &.{ &a, &b } };
+    var report = try checkAlloc(T, &v);
+    try std.testing.expectEqual(@as(usize, 1), report.issues.len);
+    try std.testing.expectEqual(serval.core.IssueCode.unique, report.issues[0].code);
+    report.deinit(std.testing.allocator);
+
+    const ok_v = T{ .tags = &.{ "one", "two" } };
+    report = try checkAlloc(T, &ok_v);
+    defer report.deinit(std.testing.allocator);
+    try std.testing.expect(report.ok());
+}
+
+test "unique: structs compared deeply, including their string fields" {
+    const Item = struct { id: u32, name: []const u8 };
+    const T = struct {
+        items: []const Item = &.{},
+
+        pub const serval = .{ .fields = .{ .items = .{ .unique = true } } };
+    };
+    var n1 = [_]u8{'x'};
+    var n2 = [_]u8{'x'};
+    const dup = T{ .items = &.{ .{ .id = 1, .name = &n1 }, .{ .id = 1, .name = &n2 } } };
+    var report = try checkAlloc(T, &dup);
+    try std.testing.expectEqual(serval.core.IssueCode.unique, report.issues[0].code);
+    report.deinit(std.testing.allocator);
+
+    const distinct = T{ .items = &.{ .{ .id = 1, .name = "x" }, .{ .id = 2, .name = "x" } } };
+    report = try checkAlloc(T, &distinct);
+    defer report.deinit(std.testing.allocator);
+    try std.testing.expect(report.ok());
+}
+
+test "unique: float equality per spec §5 — NaN never duplicates, -0.0 == 0.0 does" {
+    const T = struct {
+        xs: []const f64 = &.{},
+
+        pub const serval = .{ .fields = .{ .xs = .{ .unique = true } } };
+    };
+    const nans = T{ .xs = &.{ std.math.nan(f64), std.math.nan(f64) } };
+    var report = try checkAlloc(T, &nans);
+    try std.testing.expect(report.ok());
+    report.deinit(std.testing.allocator);
+
+    const zeros = T{ .xs = &.{ -0.0, 0.0 } };
+    report = try checkAlloc(T, &zeros);
+    defer report.deinit(std.testing.allocator);
+    try std.testing.expectEqual(serval.core.IssueCode.unique, report.issues[0].code);
+}
+
+test "unique: dynamic path adopts the same definition, Value-tag strict" {
+    const T = struct {
+        tags: []const []const u8 = &.{},
+
+        pub const serval = .{ .fields = .{ .tags = .{ .unique = true } } };
+    };
+    var report = try serval.validate.valueAgainstSchema(T, vObj(&.{
+        .{ .name = "tags", .value = .{ .array = &.{ .{ .string = "dup" }, .{ .string = "dup" } } } },
+    }), std.testing.allocator, .{});
+    try std.testing.expectEqual(serval.core.IssueCode.unique, report.issues[0].code);
+    report.deinit(std.testing.allocator);
+
+    // int 1 and float 1.0 are different Value variants — not duplicates.
+    const N = struct {
+        ns: []const f64 = &.{},
+
+        pub const serval = .{ .fields = .{ .ns = .{ .unique = true } } };
+    };
+    report = try serval.validate.valueAgainstSchema(N, vObj(&.{
+        .{ .name = "ns", .value = .{ .array = &.{ .{ .int = 1 }, .{ .float = 1.0 } } } },
+    }), std.testing.allocator, .{});
+    defer report.deinit(std.testing.allocator);
+    try std.testing.expect(report.ok());
+}
+
+test "pattern: full-match option" {
+    const T = struct {
+        code: []const u8 = "",
+
+        pub const serval = .{ .fields = .{ .code = .{ .pattern = "a+", .pattern_full = true } } };
+    };
+    const partial = T{ .code = "baaa" }; // search would match; full must not
+    var report = try checkAlloc(T, &partial);
+    try std.testing.expectEqual(serval.core.IssueCode.pattern, report.issues[0].code);
+    report.deinit(std.testing.allocator);
+
+    const exact = T{ .code = "aaa" };
+    report = try checkAlloc(T, &exact);
+    defer report.deinit(std.testing.allocator);
+    try std.testing.expect(report.ok());
+}
+
 // serval-bfp
 const Minor = struct {
     age: u8,

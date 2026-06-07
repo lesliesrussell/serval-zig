@@ -16,6 +16,9 @@ pub const FieldMeta = struct {
     min_len: ?usize = null,
     max_len: ?usize = null,
     pattern: ?[]const u8 = null,
+    // serval-m9b: require the pattern to match the whole string instead
+    // of mvzr's default search semantics.
+    pattern_full: bool = false,
     email: bool = false,
     url: bool = false,
     // serval-elw

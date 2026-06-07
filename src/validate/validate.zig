@@ -55,6 +55,49 @@ fn checkStructValue(comptime T: type, value: *const T, ctx: *core.ValidateContex
     }
 }
 
+// serval-m9b
+/// Equality as frozen in SPEC §5: scalars/enums/bools by ==, floats by ==
+/// (NaN never equal, -0.0 == 0.0), slices element-wise by content,
+/// structs field-wise, optionals/unions structurally.
+pub fn deepEql(a: anytype, b: @TypeOf(a)) bool {
+    const T = @TypeOf(a);
+    switch (@typeInfo(T)) {
+        .pointer => |p| {
+            if (p.size != .slice) return a == b;
+            if (a.len != b.len) return false;
+            if (p.child == u8) return std.mem.eql(u8, a, b);
+            for (a, b) |x, y| {
+                if (!deepEql(x, y)) return false;
+            }
+            return true;
+        },
+        .array => {
+            for (a, b) |x, y| {
+                if (!deepEql(x, y)) return false;
+            }
+            return true;
+        },
+        .@"struct" => |s| {
+            inline for (s.fields) |f| {
+                if (!deepEql(@field(a, f.name), @field(b, f.name))) return false;
+            }
+            return true;
+        },
+        .optional => {
+            if (a == null and b == null) return true;
+            if (a == null or b == null) return false;
+            return deepEql(a.?, b.?);
+        },
+        .@"union" => {
+            if (std.meta.activeTag(a) != std.meta.activeTag(b)) return false;
+            switch (a) {
+                inline else => |pa, tag| return deepEql(pa, @field(b, @tagName(tag))),
+            }
+        },
+        else => return a == b,
+    }
+}
+
 // serval-l3p
 /// Validate an untyped core.Value tree against Schema(T): shape
 /// (invalid_type / required / unknown_field) plus the same constraint rules
@@ -226,11 +269,25 @@ fn checkFieldNode(
                         .code = .max_items,
                         .message = "more items than max_items",
                     });
+                    // serval-m9b: unique on the dynamic path uses deepEql
+                    // over Value — variant-strict (int 1 ≠ float 1.0).
+                    if (sf.meta.unique) {
+                        outer: for (items, 0..) |a, i| {
+                            for (items[i + 1 ..]) |b| {
+                                if (deepEql(a, b)) {
+                                    ctx.issue(.{
+                                        .path = .field(sf.name),
+                                        .code = .unique,
+                                        .message = "duplicate items in unique collection",
+                                    });
+                                    break :outer;
+                                }
+                            }
+                        }
+                    }
                     // serval-sru: struct elements recurse with index
                     // segments; other elements are shape-checked only —
                     // field constraints don't apply to individual elements.
-                    // (.unique is skipped on the dynamic path: Value
-                    // equality semantics are undefined.)
                     if (comptime @typeInfo(p.child) == .@"struct") {
                         ctx.pushPath(.{ .field = sf.name });
                         defer ctx.popPath();
@@ -428,7 +485,12 @@ fn checkString(comptime f: core.Field, v: []const u8, ctx: *core.ValidateContext
     if (m.pattern) |pat| {
         const rx = comptime mvzr.compile(pat) orelse
             @compileError("serval: invalid regex in .pattern rule: " ++ pat);
-        if (!rx.isMatch(v)) ctx.issue(.{
+        // serval-m9b: full-match requires the match to span the string.
+        const matched = if (comptime m.pattern_full) blk: {
+            const mm = rx.match(v) orelse break :blk false;
+            break :blk mm.start == 0 and mm.end == v.len;
+        } else rx.isMatch(v);
+        if (!matched) ctx.issue(.{
             .path = .field(f.name),
             .code = .pattern,
             .message = "string does not match pattern",
@@ -464,7 +526,8 @@ fn checkCollection(comptime f: core.Field, v: anytype, ctx: *core.ValidateContex
     if (m.unique) {
         outer: for (v, 0..) |a, i| {
             for (v[i + 1 ..]) |b| {
-                if (std.meta.eql(a, b)) {
+                // serval-m9b: deep content equality per SPEC §5.
+                if (deepEql(a, b)) {
                     ctx.issue(.{
                         .path = .field(f.name),
                         .code = .unique,
