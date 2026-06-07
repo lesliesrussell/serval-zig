@@ -45,6 +45,30 @@ pub fn schemaOf(comptime T: type) type {
     return Schema(T);
 }
 
+// serval-gy5
+/// Metadata may be declared as `pub const serval` or — because that name
+/// shadows the conventional import alias inside hook functions — as
+/// `pub const serval_schema`. Declaring both is a compile error.
+pub fn hasMeta(comptime T: type) bool {
+    return @hasDecl(T, "serval") or @hasDecl(T, "serval_schema");
+}
+
+// serval-gy5
+fn MetaType(comptime T: type) type {
+    if (@hasDecl(T, "serval")) return @TypeOf(T.serval);
+    return @TypeOf(T.serval_schema);
+}
+
+// serval-gy5
+pub fn metaOf(comptime T: type) MetaType(T) {
+    if (@hasDecl(T, "serval")) {
+        if (@hasDecl(T, "serval_schema"))
+            @compileError("declare either 'serval' or 'serval_schema' metadata on " ++ @typeName(T) ++ ", not both");
+        return T.serval;
+    }
+    return T.serval_schema;
+}
+
 // serval-4am
 fn collectFields(comptime T: type) []const Field {
     comptime {
@@ -74,8 +98,8 @@ fn collectOptions(comptime T: type) TypeOptions {
     comptime {
         if (@typeInfo(T) != .@"struct" and @typeInfo(T) != .@"union" and @typeInfo(T) != .@"enum")
             return .{};
-        if (!@hasDecl(T, "serval")) return .{};
-        const m = T.serval;
+        if (!hasMeta(T)) return .{};
+        const m = metaOf(T);
         var out: TypeOptions = .{};
         for (@typeInfo(@TypeOf(m)).@"struct".fields) |f| {
             if (std.mem.eql(u8, f.name, "fields")) continue;
@@ -90,8 +114,8 @@ fn collectOptions(comptime T: type) TypeOptions {
 // serval-4am
 fn fieldMetaFor(comptime T: type, comptime field_name: []const u8) field_meta.FieldMeta {
     comptime {
-        if (!@hasDecl(T, "serval")) return .{};
-        const m = T.serval;
+        if (!hasMeta(T)) return .{};
+        const m = metaOf(T);
         if (!@hasField(@TypeOf(m), "fields")) return .{};
         const fs = m.fields;
         if (!@hasField(@TypeOf(fs), field_name)) return .{};
@@ -102,8 +126,8 @@ fn fieldMetaFor(comptime T: type, comptime field_name: []const u8) field_meta.Fi
 // serval-4am
 fn verifyMetadataFieldKeys(comptime T: type) void {
     comptime {
-        if (!@hasDecl(T, "serval")) return;
-        const m = T.serval;
+        if (!hasMeta(T)) return;
+        const m = metaOf(T);
         if (!@hasField(@TypeOf(m), "fields")) return;
         for (@typeInfo(@TypeOf(m.fields)).@"struct".fields) |mf| {
             if (!@hasField(T, mf.name))
@@ -137,8 +161,8 @@ fn coerceInto(comptime Target: type, comptime src: anytype, comptime Owner: type
 pub fn fieldValidator(comptime T: type, comptime field_name: []const u8) ?type {
     comptime {
         if (@typeInfo(T) != .@"struct") return null;
-        if (!@hasDecl(T, "serval")) return null;
-        const m = T.serval;
+        if (!hasMeta(T)) return null;
+        const m = metaOf(T);
         if (!@hasField(@TypeOf(m), "fields")) return null;
         if (!@hasField(@TypeOf(m.fields), field_name)) return null;
         const fm = @field(m.fields, field_name);

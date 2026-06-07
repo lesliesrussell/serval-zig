@@ -3,9 +3,10 @@
 
 const core = @import("serval-core");
 
-/// Whether T carries a `pub const serval = .{ ... }` metadata declaration.
+/// Whether T carries serval metadata (`pub const serval` or
+/// `pub const serval_schema`).
 pub fn hasMetadata(comptime T: type) bool {
-    return @hasDecl(T, "serval");
+    return core.schema.hasMeta(T);
 }
 
 pub const schemaOf = core.schemaOf;

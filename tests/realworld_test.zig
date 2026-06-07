@@ -200,6 +200,41 @@ test "config: json with transforms, internal union, defaults, presence rule" {
     try std.testing.expectEqual(serval.core.IssueCode.one_of, bad_env.invalid.issues[0].code);
 }
 
+// serval-gy5
+test "metadata: serval_schema decl avoids shadowing the import alias" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const T = struct {
+        name: []const u8,
+
+        // alternate decl name: hooks can reference `serval.` directly
+        pub const serval_schema = .{ .fields = .{ .name = .{ .min_len = 2 } } };
+
+        pub fn servalValidate(ctx: *serval.core.ValidateContext, self: *const @This()) void {
+            if (std.mem.startsWith(u8, self.name, "x")) {
+                ctx.issue(.{
+                    .path = serval.core.Path.field("name"),
+                    .code = .custom,
+                    .message = "names may not start with x",
+                });
+            }
+        }
+    };
+
+    // metadata honored through the alternate name
+    const dr = try serval.json.decodeResult(T, arena.allocator(),
+        \\{"name":"a"}
+    , .{});
+    try std.testing.expectEqual(serval.core.IssueCode.min_len, dr.invalid.issues[0].code);
+
+    // hook references serval.* without any file-scope alias
+    const hooked = try serval.json.decodeResult(T, arena.allocator(),
+        \\{"name":"xeno"}
+    , .{});
+    try std.testing.expectEqual(serval.core.IssueCode.custom, hooked.invalid.issues[0].code);
+}
+
 test "config: same shape from ZON within its declared capabilities" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

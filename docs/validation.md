@@ -68,3 +68,10 @@ pattern \"a+\"") — limits are comptime, so this costs nothing at
 runtime. `report.render(writer)` produces the human view: one line per
 issue, full nested/array path first, expected/actual appended when
 present; issues arrive in field-walk order so related paths cluster.
+
+## Metadata decl naming
+
+`pub const serval = .{...}` shadows the conventional import alias inside
+hook functions on the same type. Either alias library types at file
+scope, or declare the metadata as `pub const serval_schema = .{...}` —
+both names are equivalent; declaring both is a compile error.
