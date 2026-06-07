@@ -4,6 +4,8 @@
 //! rest of the codebase.
 
 pub const codec = @import("codec.zig");
+// serval-2wi
+pub const binary = @import("binary.zig");
 pub const decode = @import("decode.zig");
 pub const encode = @import("encode.zig");
 pub const reader = @import("reader.zig");
