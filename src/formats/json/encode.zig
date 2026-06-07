@@ -93,7 +93,25 @@ fn encodeAny(
                 try encodeArray(p.child, v, e, parent);
             }
         },
-        .@"struct" => try encodeStruct(T, v, e),
+        .@"struct" => {
+            // serval-2si: map entry order is data — emitted as-is, canonical
+            // included.
+            if (comptime core.isMap(T)) {
+                try e.writer.writeByte('{');
+                e.depth += 1;
+                for (v.entries, 0..) |entry, i| {
+                    if (i != 0) try e.writer.writeByte(',');
+                    try newlineIndent(e);
+                    try fieldKey(entry.key, e);
+                    try encodeAny(T.ValueType, entry.value, e, parent);
+                }
+                e.depth -= 1;
+                if (v.entries.len != 0) try newlineIndent(e);
+                try e.writer.writeByte('}');
+                return;
+            }
+            try encodeStruct(T, v, e);
+        },
         // serval-x9g
         .@"union" => try encodeUnion(T, v, e),
         else => @compileError("serval-json: unsupported type " ++ @typeName(T)),

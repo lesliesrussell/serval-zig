@@ -112,6 +112,23 @@ test "openapi: operation fragment decodes with renames and shape-matched unions"
     try std.testing.expectEqualStrings("no such user", op.responses.not_found.?.description);
 }
 
+// serval-2si: the finding above is now closed — typed string-keyed maps.
+test "openapi: arbitrary path keys decode into core.Map" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const PathItem = struct { get: ?Operation = null };
+    const Paths = struct { paths: serval.core.Map(PathItem) };
+    const doc = try std.fmt.allocPrint(arena.allocator(),
+        \\{{"paths":{{"/users/{{id}}":{{"get":{s}}},"/health":{{}}}}}}
+    , .{openapi_fragment});
+
+    const v = try serval.json.decode(Paths, arena.allocator(), doc, .{});
+    try std.testing.expectEqual(@as(usize, 2), v.paths.entries.len);
+    try std.testing.expectEqualStrings("getUser", v.paths.get("/users/{id}").?.get.?.operation_id);
+    try std.testing.expect(v.paths.get("/health").?.get == null);
+}
+
 test "openapi: arbitrary path keys go through the dynamic Value API" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

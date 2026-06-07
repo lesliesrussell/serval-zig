@@ -331,6 +331,41 @@ fn checkFieldNode(
         },
         // serval-sru
         .@"struct" => {
+            // serval-2si: dynamic map shape — entry-count rules + struct
+            // values recursed with key segments.
+            if (comptime core.isMap(FT)) {
+                switch (v) {
+                    .object => |obj| {
+                        const m = sf.meta;
+                        if (m.nonempty and obj.len == 0) ctx.issue(.{
+                            .path = .field(sf.name),
+                            .code = .nonempty,
+                            .message = "must not be empty",
+                        });
+                        if (m.min_items) |lim| if (obj.len < lim) ctx.issue(.{
+                            .path = .field(sf.name),
+                            .code = .min_items,
+                            .message = comptime std.fmt.comptimePrint("fewer than {d} items", .{m.min_items.?}),
+                        });
+                        if (m.max_items) |lim| if (obj.len > lim) ctx.issue(.{
+                            .path = .field(sf.name),
+                            .code = .max_items,
+                            .message = comptime std.fmt.comptimePrint("more than {d} items", .{m.max_items.?}),
+                        });
+                        if (comptime @typeInfo(FT.ValueType) == .@"struct") {
+                            ctx.pushPath(.{ .field = sf.name });
+                            defer ctx.popPath();
+                            for (obj) |fv| {
+                                ctx.pushPath(.{ .key = fv.name });
+                                defer ctx.popPath();
+                                checkStructNode(FT.ValueType, fv.value, ctx, mode);
+                            }
+                        }
+                    },
+                    else => invalidType(sf, ctx, "expected object"),
+                }
+                return;
+            }
             ctx.pushPath(.{ .field = sf.name });
             defer ctx.popPath();
             checkStructNode(FT, v, ctx, mode);
@@ -376,6 +411,21 @@ fn checkValue(comptime f: core.Field, v: anytype, ctx: *core.ValidateContext) vo
         // serval-sru: typed check now recurses into nested structs (their
         // constraints were previously skipped silently).
         .@"struct" => {
+            // serval-2si: maps — collection rules apply to entries; struct
+            // values recurse with key segments.
+            if (comptime core.isMap(V)) {
+                checkCollection(f, v.entries, ctx);
+                if (comptime @typeInfo(V.ValueType) == .@"struct") {
+                    ctx.pushPath(.{ .field = f.name });
+                    defer ctx.popPath();
+                    for (v.entries) |entry| {
+                        ctx.pushPath(.{ .key = entry.key });
+                        defer ctx.popPath();
+                        checkStructValue(V.ValueType, &entry.value, ctx);
+                    }
+                }
+                return;
+            }
             ctx.pushPath(.{ .field = f.name });
             defer ctx.popPath();
             checkStructValue(V, &v, ctx);

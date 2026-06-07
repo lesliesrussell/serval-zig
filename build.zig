@@ -114,6 +114,8 @@ pub fn build(b: *std.Build) void {
         "tests/realworld_test.zig",
         // serval-wf8
         "tests/schema_parity_test.zig",
+        // serval-2si
+        "tests/map_test.zig",
     };
     for (test_files) |tf| {
         const t = b.addTest(.{

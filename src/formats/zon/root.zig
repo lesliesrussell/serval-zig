@@ -8,6 +8,7 @@
 //! - no presence tracking (ctx.has() is always false)
 //! - no borrowed mode (std.zon requires a sentinel-terminated copy)
 //! - DecodeOptions.coercion is ignored (std.zon owns the parsing)
+//! - core.Map fields are unsupported (std.zon cannot construct them)
 //! - .trim/.lowercase transforms do not run (std.zon builds the values;
 //!   a partial post-pass would be asymmetric for slice elements, so the
 //!   capability flag is the honest answer)

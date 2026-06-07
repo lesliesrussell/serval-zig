@@ -137,7 +137,20 @@ fn writeInner(
                 if (meta.unique) try w.writeAll(",\"uniqueItems\":true");
             }
         },
-        .@"struct" => try writeStructInner(T, w),
+        .@"struct" => {
+            // serval-2si: maps — value subschema via additionalProperties,
+            // entry-count rules via min/maxProperties.
+            if (comptime core.isMap(T)) {
+                try w.writeAll("\"type\":\"object\",\"additionalProperties\":{");
+                try writeInner(T.ValueType, .{}, .{}, w);
+                try w.writeByte('}');
+                const min_props: ?usize = meta.min_items orelse if (meta.nonempty) 1 else null;
+                if (min_props) |m| try w.print(",\"minProperties\":{d}", .{m});
+                if (meta.max_items) |m| try w.print(",\"maxProperties\":{d}", .{m});
+                return;
+            }
+            try writeStructInner(T, w);
+        },
         .@"union" => try writeUnionInner(T, w),
         else => @compileError("serval schema export: unsupported type " ++ @typeName(T)),
     }

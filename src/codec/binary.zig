@@ -301,7 +301,7 @@ pub fn Backend(comptime Wire: type) type {
         };
 
         fn decodeTop(comptime T: type, d: *Decoder) core.DecodeError!T {
-            if (@typeInfo(T) == .@"struct") return decodeStruct(T, d, true);
+            if (@typeInfo(T) == .@"struct" and !comptime core.isMap(T)) return decodeStruct(T, d, true);
             return decodeAny(T, d, .{});
         }
 
@@ -436,10 +436,46 @@ pub fn Backend(comptime Wire: type) type {
                     if (p.child == u8) return try stringValue(d);
                     return try decodeSlice(p.child, d, parent);
                 },
-                .@"struct" => return decodeStruct(T, d, false),
+                .@"struct" => {
+                    // serval-2si
+                    if (comptime core.isMap(T)) return decodeMap(T, d, parent);
+                    return decodeStruct(T, d, false);
+                },
                 .@"union" => return decodeUnion(T, d),
                 else => @compileError("serval binary backend: unsupported type " ++ @typeName(T)),
             }
+        }
+
+        // serval-2si
+        fn decodeMap(
+            comptime M: type,
+            d: *Decoder,
+            comptime parent: core.TypeOptions,
+        ) core.DecodeError!M {
+            const n = switch (try Wire.readHeader(d)) {
+                .map => |n| n,
+                else => return error.UnexpectedToken,
+            };
+            try d.enterNest();
+            defer d.depth -= 1;
+            const entries = d.allocator.alloc(M.Entry, n) catch return error.OutOfMemory;
+            for (entries) |*slot| {
+                const kn = switch (try Wire.readHeader(d)) {
+                    .str => |kn| kn,
+                    else => return error.UnexpectedToken,
+                };
+                const raw = try d.readSlice(kn);
+                const key = if (d.options.memory == .owned)
+                    d.allocator.dupe(u8, raw) catch return error.OutOfMemory
+                else
+                    raw;
+                const descends = comptime core.type_info.containsStruct(M.ValueType);
+                if (descends) d.ctx.pushPath(.{ .key = key });
+                const v = try decodeAny(M.ValueType, d, parent);
+                if (descends) d.ctx.popPath();
+                slot.* = .{ .key = key, .value = v };
+            }
+            return .{ .entries = entries };
         }
 
         fn decodeSlice(
@@ -757,7 +793,18 @@ pub fn Backend(comptime Wire: type) type {
                         for (v) |item| try encodeAny(p.child, item, w, parent, canonical);
                     }
                 },
-                .@"struct" => try encodeStruct(T, v, w, canonical),
+                .@"struct" => {
+                    // serval-2si: map entry order is data — emitted as-is.
+                    if (comptime core.isMap(T)) {
+                        try Wire.writeMapHeader(w, v.entries.len);
+                        for (v.entries) |entry| {
+                            try Wire.writeStr(w, entry.key);
+                            try encodeAny(T.ValueType, entry.value, w, parent, canonical);
+                        }
+                        return;
+                    }
+                    try encodeStruct(T, v, w, canonical);
+                },
                 .@"union" => try encodeUnion(T, v, w, canonical),
                 else => @compileError("serval binary backend: unsupported type " ++ @typeName(T)),
             }

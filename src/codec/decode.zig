@@ -127,7 +127,21 @@ pub fn fromValueOpts(
             }
             return out;
         },
-        .@"struct" => return fromValueStruct(T, allocator, v, mode),
+        .@"struct" => {
+            // serval-2si
+            if (comptime core.isMap(T)) {
+                const obj = switch (v) {
+                    .object => |o| o,
+                    else => return error.UnexpectedToken,
+                };
+                const entries = allocator.alloc(T.Entry, obj.len) catch return error.OutOfMemory;
+                for (obj, entries) |fv, *slot| {
+                    slot.* = .{ .key = fv.name, .value = try fromValueOpts(T.ValueType, allocator, fv.value, parent, mode) };
+                }
+                return .{ .entries = entries };
+            }
+            return fromValueStruct(T, allocator, v, mode);
+        },
         .@"union" => return fromValueUnion(T, allocator, v, mode),
         else => @compileError("serval-codec: unsupported type " ++ @typeName(T)),
     }

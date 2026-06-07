@@ -100,3 +100,15 @@ metadata gains `.ext = .{ .msgpack_type = -1, .cbor_tag = 1, .decode = fn,
 tags 0/1) opt into native representations per backend; unknown
 ext/tags continue to follow `DecodeOptions.extensions`. Encode never
 emits ext/tags until that lands.
+
+## String-keyed maps
+
+`core.Map(V)` decodes/encodes wire objects with arbitrary string keys
+(OpenAPI paths, env blocks). Association-slice representation: arena-
+friendly, order-preserving — entry order is part of the value, so
+canonical encoding does not reorder entries (determinism holds).
+Collection rules (`nonempty`/`min_items`/`max_items`/`unique`) apply to
+entries; struct values validate recursively with `["key"]` path
+segments. Schema export emits `additionalProperties` + min/max
+Properties. json/msgpack/cbor; ZON cannot construct it (std.zon owns
+parsing).

@@ -9,6 +9,10 @@ pub const field_meta = @import("field_meta.zig");
 pub const attributes = @import("attributes.zig");
 // serval-4am
 pub const naming = @import("naming.zig");
+// serval-2si
+pub const map = @import("map.zig");
+pub const Map = map.Map;
+pub const isMap = map.isMap;
 pub const value = @import("value.zig");
 pub const context = @import("context.zig");
 pub const errors = @import("errors.zig");

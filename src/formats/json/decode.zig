@@ -288,7 +288,7 @@ fn Decoder(comptime Source: type) type {
 }
 
 fn decodeTop(comptime T: type, d: anytype) core.DecodeError!T {
-    if (@typeInfo(T) == .@"struct") return decodeStruct(T, d, true);
+    if (@typeInfo(T) == .@"struct" and !comptime core.isMap(T)) return decodeStruct(T, d, true);
     return decodeAny(T, d, .{});
 }
 
@@ -382,7 +382,11 @@ fn decodeAny(
                 return try stringValue(d);
             return try decodeSlice(p.child, d, parent);
         },
-        .@"struct" => return decodeStruct(T, d, false),
+        .@"struct" => {
+            // serval-2si
+            if (comptime core.isMap(T)) return decodeMap(T, d, parent);
+            return decodeStruct(T, d, false);
+        },
         // serval-x9g
         .@"union" => return decodeUnion(T, d),
         else => @compileError("serval-json: unsupported type " ++ @typeName(T)),
@@ -647,6 +651,37 @@ fn decodeValue(d: anytype) core.DecodeError!core.Value {
         },
         else => return error.UnexpectedToken,
     }
+}
+
+// serval-2si
+fn decodeMap(
+    comptime M: type,
+    d: anytype,
+    comptime parent: core.TypeOptions,
+) core.DecodeError!M {
+    switch (try nextToken(d)) {
+        .object_begin => {},
+        else => return error.UnexpectedToken,
+    }
+    var list: std.ArrayList(M.Entry) = .empty;
+    defer list.deinit(d.allocator);
+    while (true) {
+        const key = switch (try nextToken(d)) {
+            .object_end => break,
+            .string => |s| if (d.options.memory == .owned)
+                d.allocator.dupe(u8, s) catch return error.OutOfMemory
+            else
+                s,
+            .allocated_string => |s| s,
+            else => return error.UnexpectedToken,
+        };
+        const descends = comptime core.type_info.containsStruct(M.ValueType);
+        if (descends) d.ctx.pushPath(.{ .key = key });
+        const v = try decodeAny(M.ValueType, d, parent);
+        if (descends) d.ctx.popPath();
+        list.append(d.allocator, .{ .key = key, .value = v }) catch return error.OutOfMemory;
+    }
+    return .{ .entries = list.toOwnedSlice(d.allocator) catch return error.OutOfMemory };
 }
 
 fn decodeSlice(
