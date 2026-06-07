@@ -9,3 +9,9 @@ zig-out/
 
 # OMC state
 .omc/
+.beads/
+.claude/
+
+CLAUDE.md
+AGENTS.md
+serval-*.md

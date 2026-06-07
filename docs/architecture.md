@@ -1,8 +1,7 @@
 # Architecture
 
-Full design rationale lives in the repo-root design notes
-(`serval-layout.md`, `serval-naming-etc.md`). This page is the working
-summary.
+This page is the working architecture summary; frozen semantics live in
+[SPEC.md](SPEC.md).
 
 ## Principle
 
