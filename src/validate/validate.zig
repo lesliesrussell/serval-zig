@@ -322,7 +322,8 @@ fn checkScalar(comptime f: core.Field, v: anytype, ctx: *core.ValidateContext) v
             .path = .field(f.name),
             .code = .one_of,
             .message = "value not in allowed set",
-            .actual = if (std.math.cast(i64, v)) |a| .{ .int = a } else null,
+            // serval-dfo (D1): i128 payload holds any supported int.
+            .actual = .{ .int = x },
         });
     }
 }
@@ -371,7 +372,8 @@ fn issueScalar(
         .code = code,
         .message = message,
         .expected = .{ .int = expected },
-        .actual = if (std.math.cast(i64, actual)) |a| .{ .int = a } else null,
+        // serval-dfo (D1)
+        .actual = .{ .int = actual },
     });
 }
 

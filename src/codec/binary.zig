@@ -471,7 +471,8 @@ pub fn Backend(comptime Wire: type) type {
         /// internal/untagged union buffering).
         fn decodeValue(d: *Decoder) core.DecodeError!core.Value {
             switch (try Wire.readHeader(d)) {
-                .int => |n| return .{ .int = std.math.cast(i64, n) orelse return error.Overflow },
+                // serval-dfo (D1): Value.int is i128 — no loss point here.
+                .int => |n| return .{ .int = n },
                 .float => |f| return .{ .float = f },
                 .bool => |b| return .{ .bool = b },
                 .nil => return .null,

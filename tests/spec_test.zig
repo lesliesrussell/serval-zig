@@ -12,17 +12,17 @@ fn arenaAlloc(arena: *std.heap.ArenaAllocator) std.mem.Allocator {
 
 // --- §2 Value contract -------------------------------------------------
 
-test "spec §2: Value.int is i64 — u64 beyond maxInt(i64) is a loss point on the dynamic path" {
+test "spec §2 (D1: resolved widen): Value.int is i128 — full u64 survives the dynamic path" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
     const Big = struct { n: u64 };
     const encoded = try serval.msgpack.encodeAlloc(Big, arena.allocator(), .{ .n = std.math.maxInt(u64) }, .{});
-    // Typed path: lossless.
     const typed = try serval.msgpack.decode(Big, arena.allocator(), encoded, .{});
     try std.testing.expectEqual(std.math.maxInt(u64), typed.n);
-    // Dynamic path: Overflow (DECISION D1 may widen Value.int to i128).
-    try std.testing.expectError(error.Overflow, serval.msgpack.decodeValue(arena.allocator(), encoded, .{}));
+
+    const dyn = try serval.msgpack.decodeValue(arena.allocator(), encoded, .{});
+    try std.testing.expectEqual(@as(i128, std.math.maxInt(u64)), dyn.object[0].value.int);
 }
 
 // --- §4 Coercion edge matrix --------------------------------------------
@@ -74,17 +74,20 @@ test "spec §4: scientific-notation NUMBER tokens reach ints only via aggressive
     try std.testing.expectEqual(@as(u8, 100), v.n);
 }
 
-test "spec §4: Zig digit separators currently leak into string-to-int coercion (DECISION D3)" {
+test "spec §4 (D3: resolved reject): digit separators do not coerce — wire data is not Zig source" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
+    const a = arena.allocator();
 
-    const v = try serval.json.decode(IntField, arena.allocator(),
+    try std.testing.expectError(error.UnexpectedToken, serval.json.decode(IntField, a,
         \\{"n":"1_0"}
-    , .{ .coercion = .safe });
-    try std.testing.expectEqual(@as(u8, 10), v.n);
+    , .{ .coercion = .safe }));
+    try std.testing.expectError(error.UnexpectedToken, serval.json.decode(FloatField, a,
+        \\{"x":"1_0.5"}
+    , .{ .coercion = .safe }));
 }
 
-test "spec §4: string-to-float coercion currently accepts inf/nan spellings (DECISION D2)" {
+test "spec §4 (D2: resolved restrict): string-to-float coercion is finite decimal only" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -94,10 +97,12 @@ test "spec §4: string-to-float coercion currently accepts inf/nan spellings (DE
     , .{ .coercion = .safe });
     try std.testing.expectEqual(@as(f64, 100), sci.x);
 
-    const inf = try serval.json.decode(FloatField, a,
+    try std.testing.expectError(error.UnexpectedToken, serval.json.decode(FloatField, a,
         \\{"x":"inf"}
-    , .{ .coercion = .safe });
-    try std.testing.expect(std.math.isInf(inf.x));
+    , .{ .coercion = .safe }));
+    try std.testing.expectError(error.UnexpectedToken, serval.json.decode(FloatField, a,
+        \\{"x":"nan"}
+    , .{ .coercion = .safe }));
 }
 
 test "spec §4: float-to-int truncates toward zero; non-finite and out-of-range are Overflow" {

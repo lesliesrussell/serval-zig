@@ -19,12 +19,20 @@ pub const CoercionMode = enum {
 
 // serval-4tr
 pub fn intFromString(comptime T: type, s: []const u8) ?T {
+    // serval-dfo (D3): wire data is not Zig source — digit separators
+    // ("1_0") are rejected rather than silently parsed.
+    if (std.mem.indexOfScalar(u8, s, '_') != null) return null;
     return std.fmt.parseInt(T, s, 10) catch null;
 }
 
 // serval-4tr
 pub fn floatFromString(comptime T: type, s: []const u8) ?T {
-    return std.fmt.parseFloat(T, s) catch null;
+    // serval-dfo (D2/D3): finite decimal only — "inf"/"nan" spellings and
+    // digit separators do not coerce.
+    if (std.mem.indexOfScalar(u8, s, '_') != null) return null;
+    const f = std.fmt.parseFloat(T, s) catch return null;
+    if (!std.math.isFinite(f)) return null;
+    return f;
 }
 
 // serval-4tr

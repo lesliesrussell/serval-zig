@@ -6,7 +6,9 @@
 pub const Value = union(enum) {
     null,
     bool: bool,
-    int: i64,
+    // serval-dfo (D1): i128 so the full u64+i64 range survives dynamic
+    // paths losslessly.
+    int: i128,
     float: f64,
     string: []const u8,
     bytes: []const u8,

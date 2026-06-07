@@ -19,10 +19,9 @@ conformance by the cross-backend conformance suite (serval-9a3).
 `Value` is a **lowest-common-denominator data model with explicit loss
 points**, not a lossless IR:
 
-- `int: i64` — integers outside i64 (`u64 > maxInt(i64)`) **error with
-  `Overflow` on any dynamic path** (`decodeValue`, `.collect`, buffered
-  unions). The typed path is lossless for all `u64`. *(DECISION D1: widen
-  to i128.)*
+- `int: i128` *(D1: resolved — widened)* — the full `u64` and `i64`
+  ranges survive every path, typed and dynamic, losslessly. Integers
+  wider than 64 bits remain unsupported at the schema level.
 - `float: f64` — f16/f32 wire values widen losslessly; no fixed-point.
 - `string` vs `bytes` — distinct variants. Text-only formats (JSON, ZON)
   never produce `.bytes`; binary formats produce `.bytes` for their byte
@@ -65,12 +64,14 @@ Edge semantics (all pinned):
   whitespace; rejects scientific notation **in every mode** (string
   coercion is exact-int only — deliberately asymmetric with number
   tokens, which reach ints via aggressive truncation).
-- *(DECISION D3)* `std.fmt.parseInt` accepts Zig digit separators:
-  `"1_0"` currently coerces to `10`.
-- *(DECISION D2)* `parseFloat` accepts `inf`/`nan` spellings: string
-  `"inf"` currently coerces into float fields under `.safe`.
+- *(D3: resolved — reject)* Digit separators never coerce: `"1_0"` is a
+  type mismatch, not `10`. Wire data is not Zig source.
+- *(D2: resolved — restrict)* String→float coercion is **finite decimal
+  only**: `"inf"`/`"nan"` spellings are rejected. Non-finite floats are
+  reachable only through native float tokens where a format carries them.
 - Float→int truncates toward zero; out-of-range **and non-finite** map to
-  `error.Overflow` *(DECISION D4)*.
+  `error.Overflow` *(D4: resolved — keep; "doesn't fit the target int"
+  covers non-finite)*.
 - ZON ignores coercion entirely (std.zon owns parsing) — a documented
   capability gap, to become a flag under serval-xx5.
 
@@ -154,14 +155,16 @@ Known capability gaps (ZON: no presence/borrowed/coercion, folded shape
 errors; CBOR: no tags/indefinite; msgpack: no ext) are declared gaps, not
 permitted divergences.
 
-## 10. Open decisions
+## 10. Decisions
 
-| ID | Question | Current behavior | Options |
-|---|---|---|---|
-| D1 | `Value.int` width | i64; big u64 → `Overflow` on dynamic paths | keep i64 / widen to i128 |
-| D2 | `"inf"`/`"nan"` strings into floats under `.safe` | accepted (parseFloat) | keep / restrict to finite decimal |
-| D3 | Zig digit separators in string→int coercion | `"1_0"` → 10 | keep / reject `_` |
-| D4 | Non-finite float→int error code | `Overflow` | keep / distinct `UnexpectedToken` |
+All v1 decisions resolved 2026-06-07 (user sign-off):
 
-Resolutions are recorded here and their pinning tests updated in the same
+| ID | Question | Resolution |
+|---|---|---|
+| D1 | `Value.int` width | **Widened to i128** — dynamic paths lossless for u64+i64 |
+| D2 | `"inf"`/`"nan"` strings into floats under `.safe` | **Restricted** — finite decimal only |
+| D3 | Zig digit separators in string→int/float coercion | **Rejected** — `"1_0"` is a type mismatch |
+| D4 | Non-finite float→int error code | **Keep `Overflow`** |
+
+Future decisions append here with their pinning tests updated in the same
 commit.

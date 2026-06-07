@@ -555,7 +555,8 @@ fn decodeValue(d: anytype) core.DecodeError!core.Value {
         .string => return .{ .string = try stringSlice(d, true) },
         .number => {
             const s = try numberSlice(d);
-            if (std.fmt.parseInt(i64, s, 10)) |n| return .{ .int = n } else |_| {}
+            // serval-dfo (D1)
+            if (std.fmt.parseInt(i128, s, 10)) |n| return .{ .int = n } else |_| {}
             const f = std.fmt.parseFloat(f64, s) catch return error.InvalidSyntax;
             return .{ .float = f };
         },
