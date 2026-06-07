@@ -104,6 +104,8 @@ pub fn build(b: *std.Build) void {
         "tests/cbor_test.zig",
         // serval-1f7
         "tests/fuzz_test.zig",
+        // serval-dfo
+        "tests/spec_test.zig",
     };
     for (test_files) |tf| {
         const t = b.addTest(.{
