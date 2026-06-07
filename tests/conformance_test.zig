@@ -210,6 +210,7 @@ test "capabilities: full backends declare the full set" {
         try std.testing.expect(c.rename_metadata);
         try std.testing.expect(c.shape_issue_fidelity);
         try std.testing.expect(c.collect_unknown);
+        try std.testing.expect(c.transforms);
         try std.testing.expectEqual(serval.codec.UnionModeSupport.streaming, c.union_external);
         try std.testing.expectEqual(serval.codec.UnionModeSupport.streaming, c.union_adjacent);
         try std.testing.expectEqual(serval.codec.UnionModeSupport.buffered, c.union_internal);
@@ -225,6 +226,7 @@ test "capabilities: zon declares its gaps as flags, not prose" {
     try std.testing.expect(!c.rename_metadata);
     try std.testing.expect(!c.shape_issue_fidelity);
     try std.testing.expect(!c.collect_unknown);
+    try std.testing.expect(!c.transforms);
     try std.testing.expectEqual(serval.codec.UnionModeSupport.unsupported, c.union_external);
 }
 

@@ -50,6 +50,7 @@ pub fn Backend(comptime Wire: type) type {
             .shape_issue_fidelity = true,
             .collect_unknown = true,
             .projection = true,
+            .transforms = true,
             .union_external = .streaming,
             .union_adjacent = .streaming,
             .union_internal = .buffered,

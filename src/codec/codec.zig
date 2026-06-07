@@ -80,6 +80,9 @@ pub const Capabilities = struct {
     // serval-54c
     /// decodeProjection: subset-struct decode with top-level early exit.
     projection: bool,
+    // serval-j7w
+    /// .trim/.lowercase transforms run during decode.
+    transforms: bool,
     union_external: UnionModeSupport,
     union_adjacent: UnionModeSupport,
     union_internal: UnionModeSupport,

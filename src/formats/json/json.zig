@@ -16,6 +16,7 @@ pub const capabilities: codec.Capabilities = .{
     .shape_issue_fidelity = true,
     .collect_unknown = true,
     .projection = true,
+    .transforms = true,
     .union_external = .streaming,
     .union_adjacent = .streaming,
     .union_internal = .buffered,
