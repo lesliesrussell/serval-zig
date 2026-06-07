@@ -15,8 +15,23 @@ pub const MemoryMode = enum {
     owned,
 };
 
+// serval-8kr
+/// What binary backends do with format extension items (msgpack ext
+/// types, CBOR tags). `.collect` is deliberately absent: Value has no
+/// ext variant; revisit if a consumer needs the type/tag numbers.
+pub const ExtensionPolicy = enum {
+    /// Extension items are decode errors (default).
+    reject,
+    /// CBOR: tags are stripped transparently and the tagged value decodes
+    /// as if untagged. msgpack: ext payloads surface as bytes (the type
+    /// byte is consumed and discarded).
+    skip,
+};
+
 pub const DecodeOptions = struct {
     memory: MemoryMode = .owned,
+    // serval-8kr
+    extensions: ExtensionPolicy = .reject,
     unknown_fields: enum { ignore, reject, collect } = .reject,
     // serval-4tr: shared enum so the mode flows into validate/fromValue.
     coercion: CoercionMode = .none,

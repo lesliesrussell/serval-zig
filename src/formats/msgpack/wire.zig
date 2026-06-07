@@ -45,9 +45,21 @@ pub fn readHeader(d: anytype) core.DecodeError!Header {
         0x80...0x8f => .{ .map = b & 0x0f },
         0xde => .{ .map = try d.readBig(u16) },
         0xdf => .{ .map = try d.readBig(u32) },
-        // ext family (0xc1 is never used; 0xc7-0xc9, 0xd4-0xd8 are ext)
+        // serval-8kr: ext family — payload as bytes under .skip
+        0xd4...0xd8 => extAsBin(d, @as(usize, 1) << @intCast(b - 0xd4)),
+        0xc7 => extAsBin(d, try d.readBig(u8)),
+        0xc8 => extAsBin(d, try d.readBig(u16)),
+        0xc9 => extAsBin(d, try d.readBig(u32)),
+        // 0xc1 is never used
         else => error.UnexpectedToken,
     };
+}
+
+// serval-8kr
+fn extAsBin(d: anytype, len: usize) core.DecodeError!Header {
+    if (d.options.extensions == .reject) return error.UnexpectedToken;
+    _ = try d.readByte(); // ext type discarded
+    return .{ .bin = len };
 }
 
 pub fn writeNull(w: *Writer) Writer.Error!void {

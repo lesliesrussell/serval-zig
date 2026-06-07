@@ -35,7 +35,14 @@ fn readLen(d: anytype, ai: u5) core.DecodeError!usize {
 }
 
 pub fn readHeader(d: anytype) core.DecodeError!Header {
-    const b = try d.readByte();
+    // serval-8kr: tag stripping loops — recursion would let 1-byte tag
+    // chains turn input length into stack depth.
+    var b = try d.readByte();
+    while (b >> 5 == 6) {
+        if (d.options.extensions == .reject) return error.UnexpectedToken;
+        _ = try readArg(d, @intCast(b & 0x1f)); // tag number discarded
+        b = try d.readByte();
+    }
     const major: u3 = @intCast(b >> 5);
     const ai: u5 = @intCast(b & 0x1f);
     return switch (major) {
@@ -45,8 +52,7 @@ pub fn readHeader(d: anytype) core.DecodeError!Header {
         3 => .{ .str = try readLen(d, ai) },
         4 => .{ .array = try readLen(d, ai) },
         5 => .{ .map = try readLen(d, ai) },
-        // tags (major type 6) unsupported in v1
-        6 => error.UnexpectedToken,
+        6 => unreachable, // stripped above
         7 => switch (ai) {
             20 => .{ .bool = false },
             21 => .{ .bool = true },

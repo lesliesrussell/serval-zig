@@ -424,6 +424,52 @@ test "projection: capability flags" {
     try std.testing.expect(!serval.zon.capabilities.projection);
 }
 
+// --- Extensions policy (serval-8kr) -----------------------------------------
+
+test "extensions: cbor tags reject by default, strip transparently under .skip" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // tag(0) text"t"
+    const tagged = [_]u8{ 0xc0, 0x61, 't' };
+    try std.testing.expectError(error.UnexpectedToken, serval.cbor.decodeValue(a, &tagged, .{}));
+    const v = try serval.cbor.decodeValue(a, &tagged, .{ .extensions = .skip });
+    try std.testing.expectEqualStrings("t", v.string);
+
+    // typed path through a struct, tag wrapped around a field value
+    const P = struct { x: u8 };
+    const doc = [_]u8{ 0xa1, 0x61, 'x', 0xc1, 0x07 }; // {"x": tag(1) 7}
+    try std.testing.expectError(error.UnexpectedToken, serval.cbor.decode(P, a, &doc, .{}));
+    const p = try serval.cbor.decode(P, a, &doc, .{ .extensions = .skip });
+    try std.testing.expectEqual(@as(u8, 7), p.x);
+
+    // deep tag chains are a loop, not recursion — no stack risk
+    var chain: [2050]u8 = undefined;
+    @memset(chain[0 .. chain.len - 2], 0xc0); // tag(0) × 2048
+    chain[chain.len - 2] = 0x18; // uint8 follows
+    chain[chain.len - 1] = 42;
+    const deep = try serval.cbor.decodeValue(a, &chain, .{ .extensions = .skip });
+    try std.testing.expectEqual(@as(i128, 42), deep.int);
+}
+
+test "extensions: msgpack ext rejects by default, surfaces as bytes under .skip" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const Stamp = struct { t: []const u8 };
+    // {"t": fixext4(type -1, 0xDEADBEEF)} — msgpack timestamp shape
+    const doc = [_]u8{ 0x81, 0xa1, 't', 0xd6, 0xff, 0xde, 0xad, 0xbe, 0xef };
+    try std.testing.expectError(error.UnexpectedToken, serval.msgpack.decode(Stamp, a, &doc, .{}));
+    const s = try serval.msgpack.decode(Stamp, a, &doc, .{ .extensions = .skip });
+    try std.testing.expectEqualSlices(u8, &.{ 0xde, 0xad, 0xbe, 0xef }, s.t);
+
+    // dynamic path: ext payload lands as Value.bytes
+    const dyn = try serval.msgpack.decodeValue(a, &doc, .{ .extensions = .skip });
+    try std.testing.expectEqualSlices(u8, &.{ 0xde, 0xad, 0xbe, 0xef }, dyn.object[0].value.bytes);
+}
+
 // --- Declared gaps stay declared -----------------------------------------
 
 test "conformance: zon's shape-error folding is the documented gap, not silent drift" {

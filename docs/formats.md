@@ -81,3 +81,22 @@ truncated past that point, so this is not a validity check). Deep
 projection = nested subset structs (skip-efficient, no early exit below
 the top level). Validation and presence apply to P normally.
 json/msgpack/cbor; see `capabilities.projection`.
+
+## Extensions (msgpack ext, CBOR tags)
+
+`DecodeOptions.extensions` controls binary extension items:
+
+- `.reject` (default) — extension items are `UnexpectedToken`.
+- `.skip` — CBOR tags strip transparently (the tagged value decodes as if
+  untagged; chains handled iteratively); msgpack ext payloads surface as
+  bytes (type byte discarded), landing in `[]const u8` fields or
+  `Value.bytes`.
+- `.collect` is deliberately absent: `Value` has no ext variant to carry
+  type/tag numbers; revisit when a consumer needs them.
+
+Designed direction for rich per-type hooks (not yet implemented): field
+metadata gains `.ext = .{ .msgpack_type = -1, .cbor_tag = 1, .decode = fn,
+.encode = fn }` so user types (timestamps first: msgpack ext -1, CBOR
+tags 0/1) opt into native representations per backend; unknown
+ext/tags continue to follow `DecodeOptions.extensions`. Encode never
+emits ext/tags until that lands.
