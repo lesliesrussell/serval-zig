@@ -10,7 +10,10 @@ Each format backend exposes:
 - `encodeToWriter` — direct to `std.Io.Writer`
 - `measureEncodedLen` — exact length without producing output
 
-`serval.codec.codec.assertBackend(Backend)` comptime-checks conformance.
+`serval.codec.codec.assertBackend(Backend)` comptime-checks conformance,
+including a complete `capabilities` descriptor (`codec.Capabilities`) —
+the status table below is machine-readable as flags consumers can
+comptime-branch on.
 std.Io specifics stay isolated in `src/codec/reader.zig` and
 `src/codec/writer.zig`.
 

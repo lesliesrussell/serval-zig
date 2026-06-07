@@ -5,6 +5,7 @@
 //! tagging modes, presence tracking, borrowed mode. Ext types unsupported.
 
 pub const msgpack = @import("msgpack.zig");
+pub const capabilities = msgpack.capabilities;
 pub const decode = msgpack.decode;
 pub const decodeResult = msgpack.decodeResult;
 pub const decodeBorrowed = msgpack.decodeBorrowed;

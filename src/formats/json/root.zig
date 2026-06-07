@@ -3,6 +3,8 @@
 //! to be replaced by a schema-driven decoder as the codec pipeline lands.
 
 pub const json = @import("json.zig");
+// serval-xx5
+pub const capabilities = json.capabilities;
 pub const decode = json.decode;
 // serval-r4h
 pub const decodeResult = json.decodeResult;

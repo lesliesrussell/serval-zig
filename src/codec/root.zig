@@ -17,5 +17,8 @@ pub const alloc = @import("alloc.zig");
 pub const MemoryMode = options.MemoryMode;
 // serval-plc
 pub const fromValue = decode.fromValue;
+// serval-xx5
+pub const Capabilities = codec.Capabilities;
+pub const UnionModeSupport = codec.UnionModeSupport;
 pub const DecodeOptions = options.DecodeOptions;
 pub const EncodeOptions = options.EncodeOptions;

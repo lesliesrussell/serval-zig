@@ -7,6 +7,20 @@ const codec = @import("serval-codec");
 pub const DecodeOptions = codec.DecodeOptions;
 pub const EncodeOptions = codec.EncodeOptions;
 
+// serval-xx5
+pub const capabilities: codec.Capabilities = .{
+    .presence_tracking = true,
+    .borrowed_mode = true,
+    .coercion = true,
+    .rename_metadata = true,
+    .shape_issue_fidelity = true,
+    .collect_unknown = true,
+    .union_external = .streaming,
+    .union_adjacent = .streaming,
+    .union_internal = .buffered,
+    .union_untagged = .buffered,
+};
+
 pub const decode = @import("decode.zig").decode;
 pub const decodeFromSlice = @import("decode.zig").decode;
 // serval-r4h

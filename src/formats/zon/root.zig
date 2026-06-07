@@ -11,6 +11,8 @@
 //! Constraint validation integrates exactly like serval-json.
 
 pub const zon = @import("zon.zig");
+// serval-xx5
+pub const capabilities = zon.capabilities;
 pub const decode = zon.decode;
 pub const decodeResult = zon.decodeResult;
 pub const encodeAlloc = zon.encodeAlloc;

@@ -39,6 +39,20 @@ pub fn Backend(comptime Wire: type) type {
     return struct {
         pub const Error = core.DecodeError || error{ValidationFailed};
 
+        // serval-xx5: the template provides the full capability set.
+        pub const capabilities: @import("codec.zig").Capabilities = .{
+            .presence_tracking = true,
+            .borrowed_mode = true,
+            .coercion = true,
+            .rename_metadata = true,
+            .shape_issue_fidelity = true,
+            .collect_unknown = true,
+            .union_external = .streaming,
+            .union_adjacent = .streaming,
+            .union_internal = .buffered,
+            .union_untagged = .buffered,
+        };
+
         const DecodeOptions = options_mod.DecodeOptions;
         const EncodeOptions = options_mod.EncodeOptions;
 

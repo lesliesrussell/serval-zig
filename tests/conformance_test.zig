@@ -199,6 +199,54 @@ test "conformance: dynamic decodeValue agrees on Value shape across binary+json 
     }
 }
 
+// --- Capability descriptors (serval-xx5) ----------------------------------
+
+test "capabilities: full backends declare the full set" {
+    inline for (full_backends) |B| {
+        const c = B.capabilities;
+        try std.testing.expect(c.presence_tracking);
+        try std.testing.expect(c.borrowed_mode);
+        try std.testing.expect(c.coercion);
+        try std.testing.expect(c.rename_metadata);
+        try std.testing.expect(c.shape_issue_fidelity);
+        try std.testing.expect(c.collect_unknown);
+        try std.testing.expectEqual(serval.codec.UnionModeSupport.streaming, c.union_external);
+        try std.testing.expectEqual(serval.codec.UnionModeSupport.streaming, c.union_adjacent);
+        try std.testing.expectEqual(serval.codec.UnionModeSupport.buffered, c.union_internal);
+        try std.testing.expectEqual(serval.codec.UnionModeSupport.buffered, c.union_untagged);
+    }
+}
+
+test "capabilities: zon declares its gaps as flags, not prose" {
+    const c = serval.zon.capabilities;
+    try std.testing.expect(!c.presence_tracking);
+    try std.testing.expect(!c.borrowed_mode);
+    try std.testing.expect(!c.coercion);
+    try std.testing.expect(!c.rename_metadata);
+    try std.testing.expect(!c.shape_issue_fidelity);
+    try std.testing.expect(!c.collect_unknown);
+    try std.testing.expectEqual(serval.codec.UnionModeSupport.unsupported, c.union_external);
+}
+
+test "capabilities: consumers can comptime-branch on flags" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const Wire = struct { n: []const u8 };
+    const Target = struct { n: u8 };
+    var coercion_capable: usize = 0;
+    inline for (all_backends) |B| {
+        if (comptime B.capabilities.coercion) {
+            coercion_capable += 1;
+            const doc = try B.encodeAlloc(Wire, a, .{ .n = "42" }, .{});
+            const v = try B.decode(Target, a, doc, .{ .coercion = .safe });
+            try std.testing.expectEqual(@as(u8, 42), v.n);
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 3), coercion_capable);
+}
+
 // --- Declared gaps stay declared -----------------------------------------
 
 test "conformance: zon's shape-error folding is the documented gap, not silent drift" {

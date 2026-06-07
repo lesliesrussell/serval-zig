@@ -7,6 +7,7 @@
 //! (major type 6) rejected, f16 decoded but never emitted.
 
 pub const cbor = @import("cbor.zig");
+pub const capabilities = cbor.capabilities;
 pub const decode = cbor.decode;
 pub const decodeResult = cbor.decodeResult;
 pub const decodeBorrowed = cbor.decodeBorrowed;

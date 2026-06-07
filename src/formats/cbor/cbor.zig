@@ -11,6 +11,7 @@ pub const DecodeOptions = codec.DecodeOptions;
 pub const EncodeOptions = codec.EncodeOptions;
 pub const Error = B.Error;
 
+pub const capabilities = B.capabilities;
 pub const decode = B.decode;
 pub const decodeFromSlice = B.decode;
 pub const decodeResult = B.decodeResult;
